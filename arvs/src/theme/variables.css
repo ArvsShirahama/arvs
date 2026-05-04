@@ -1,2 +1,40 @@
 /* For information on how to create your own theme, please refer to:
 http://ionicframework.com/docs/theming/ */
+
+:root {
+  --ion-color-primary: #4f46e5;
+  --ion-color-primary-rgb: 79, 70, 229;
+  --ion-color-primary-contrast: #ffffff;
+  --ion-color-primary-contrast-rgb: 255, 255, 255;
+  --ion-color-primary-shade: #4038ca;
+  --ion-color-primary-tint: #6159e8;
+
+  --ion-color-secondary: #06b6d4;
+  --ion-color-secondary-rgb: 6, 182, 212;
+  --ion-color-secondary-contrast: #ffffff;
+  --ion-color-secondary-contrast-rgb: 255, 255, 255;
+  --ion-color-secondary-shade: #05a0bb;
+  --ion-color-secondary-tint: #1fbdd8;
+
+  --ion-font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif;
+  --ion-background-color: #ffffff;
+  --ion-text-color: #1a1a2e;
+  --ion-toolbar-background: #ffffff;
+  --ion-tab-bar-background: #ffffff;
+  --ion-tab-bar-border-color: #e5e7eb;
+}
+
+@media (prefers-color-scheme: dark) {
+  :root {
+    --ion-background-color: #0f0f1a;
+    --ion-text-color: #e4e4e7;
+    --ion-toolbar-background: #16162a;
+    --ion-tab-bar-background: #16162a;
+    --ion-tab-bar-border-color: #27273f;
+    --ion-color-light: #1e1e35;
+    --ion-color-light-shade: #27273f;
+    --ion-color-light-tint: #2d2d4a;
+    --ion-item-background: #16162a;
+    --ion-card-background: #16162a;
+  }
+}

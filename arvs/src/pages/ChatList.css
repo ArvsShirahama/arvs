@@ -1,0 +1,32 @@
+.chatlist-page {
+  --background: var(--ion-background-color);
+}
+
+.chatlist-loading {
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  height: 50vh;
+}
+
+.chatlist-empty {
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  align-items: center;
+  height: 60vh;
+  text-align: center;
+}
+
+.chatlist-empty p {
+  margin: 0.25rem 0;
+}
+
+.chatlist-empty-hint {
+  font-size: 0.85rem;
+}
+
+.chatlist-list {
+  padding: 0.5rem 0;
+  background: transparent;
+}

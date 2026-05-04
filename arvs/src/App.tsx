@@ -1,7 +1,24 @@
 import { Redirect, Route } from 'react-router-dom';
-import { IonApp, IonRouterOutlet, setupIonicReact } from '@ionic/react';
+import {
+  IonApp,
+  IonRouterOutlet,
+  IonTabs,
+  IonTabBar,
+  IonTabButton,
+  IonIcon,
+  IonLabel,
+  IonSpinner,
+  setupIonicReact,
+} from '@ionic/react';
 import { IonReactRouter } from '@ionic/react-router';
-import Home from './pages/Home';
+import { chatbubblesOutline, personOutline } from 'ionicons/icons';
+import { useAuth } from './hooks/useAuth';
+
+import Login from './pages/Login';
+import SignUp from './pages/SignUp';
+import ChatList from './pages/ChatList';
+import Chat from './pages/Chat';
+import Profile from './pages/Profile';
 
 /* Core CSS required for Ionic components to work properly */
 import '@ionic/react/css/core.css';
@@ -35,19 +52,69 @@ import './theme/variables.css';
 
 setupIonicReact();
 
-const App: React.FC = () => (
-  <IonApp>
-    <IonReactRouter>
-      <IonRouterOutlet>
-        <Route exact path="/home">
-          <Home />
-        </Route>
-        <Route exact path="/">
-          <Redirect to="/home" />
-        </Route>
-      </IonRouterOutlet>
-    </IonReactRouter>
-  </IonApp>
-);
+const App: React.FC = () => {
+  const { session, loading } = useAuth();
+
+  if (loading) {
+    return (
+      <IonApp>
+        <div style={{ display: 'flex', justifyContent: 'center', alignItems: 'center', height: '100vh' }}>
+          <IonSpinner name="crescent" />
+        </div>
+      </IonApp>
+    );
+  }
+
+  return (
+    <IonApp>
+      <IonReactRouter>
+        <IonRouterOutlet>
+          {/* Auth routes */}
+          <Route exact path="/login">
+            {session ? <Redirect to="/tabs/chats" /> : <Login />}
+          </Route>
+          <Route exact path="/signup">
+            {session ? <Redirect to="/tabs/chats" /> : <SignUp />}
+          </Route>
+
+          {/* Chat detail (outside tabs so tab bar is hidden) */}
+          <Route exact path="/chat/:conversationId">
+            {session ? <Chat /> : <Redirect to="/login" />}
+          </Route>
+
+          {/* Tab routes */}
+          <Route path="/tabs">
+            {session ? (
+              <IonTabs>
+                <IonRouterOutlet>
+                  <Route exact path="/tabs/chats" component={ChatList} />
+                  <Route exact path="/tabs/profile" component={Profile} />
+                  <Redirect exact from="/tabs" to="/tabs/chats" />
+                </IonRouterOutlet>
+                <IonTabBar slot="bottom">
+                  <IonTabButton tab="chats" href="/tabs/chats">
+                    <IonIcon icon={chatbubblesOutline} />
+                    <IonLabel>Chats</IonLabel>
+                  </IonTabButton>
+                  <IonTabButton tab="profile" href="/tabs/profile">
+                    <IonIcon icon={personOutline} />
+                    <IonLabel>Profile</IonLabel>
+                  </IonTabButton>
+                </IonTabBar>
+              </IonTabs>
+            ) : (
+              <Redirect to="/login" />
+            )}
+          </Route>
+
+          {/* Default redirect */}
+          <Route exact path="/">
+            <Redirect to={session ? '/tabs/chats' : '/login'} />
+          </Route>
+        </IonRouterOutlet>
+      </IonReactRouter>
+    </IonApp>
+  );
+};
 
 export default App;

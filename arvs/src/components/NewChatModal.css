@@ -1,0 +1,46 @@
+.new-chat-modal {
+  --background: var(--ion-background-color);
+}
+
+.new-chat-search {
+  --border-radius: 12px;
+  padding: 0.5rem 1rem;
+}
+
+.new-chat-spinner {
+  display: flex;
+  justify-content: center;
+  padding: 1.5rem 0;
+}
+
+.new-chat-empty {
+  text-align: center;
+  padding: 2rem 0;
+}
+
+.new-chat-list {
+  background: transparent;
+}
+
+.new-chat-item {
+  --padding-start: 1rem;
+  --padding-end: 1rem;
+  --min-height: 64px;
+  --background: transparent;
+}
+
+.new-chat-item .avatar {
+  margin-right: 0.75rem;
+}
+
+.new-chat-item-label h2 {
+  font-size: 1rem;
+  font-weight: 600;
+  margin: 0 0 0.1rem;
+}
+
+.new-chat-item-label p {
+  font-size: 0.85rem;
+  color: var(--ion-color-medium);
+  margin: 0;
+}

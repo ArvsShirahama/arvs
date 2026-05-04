@@ -1,0 +1,38 @@
+.chatlist-item {
+  --padding-start: 1rem;
+  --padding-end: 1rem;
+  --inner-padding-end: 0;
+  --min-height: 72px;
+  --background: transparent;
+  cursor: pointer;
+}
+
+.chatlist-item .avatar {
+  margin-right: 0.75rem;
+}
+
+.chatlist-item-content {
+  margin: 0;
+}
+
+.chatlist-item-name {
+  font-size: 1rem;
+  font-weight: 600;
+  margin: 0 0 0.15rem;
+}
+
+.chatlist-item-preview {
+  font-size: 0.85rem;
+  color: var(--ion-color-medium);
+  margin: 0;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  max-width: 220px;
+}
+
+.chatlist-item-time {
+  font-size: 0.75rem;
+  align-self: flex-start;
+  margin-top: 0.9rem;
+}
