@@ -6,11 +6,10 @@ import {
   IonButton,
   IonText,
   IonSpinner,
-  IonIcon,
   useIonRouter,
 } from '@ionic/react';
-import { logoGoogle } from 'ionicons/icons';
 import { useAuth } from '../hooks/useAuth';
+import GoogleLogo from '../components/GoogleLogo';
 import './SignUp.css';
 
 const SignUp: React.FC = () => {
@@ -138,7 +137,7 @@ const SignUp: React.FC = () => {
             onClick={signInWithGoogle}
             className="auth-google-btn"
           >
-            <IonIcon icon={logoGoogle} slot="start" />
+            <GoogleLogo />
             Continue with Google
           </IonButton>
 

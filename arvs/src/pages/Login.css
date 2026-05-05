@@ -93,6 +93,7 @@
 .auth-google-btn {
   --border-radius: 12px;
   --border-color: var(--ion-color-light-shade, #e5e7eb);
+  --color: var(--ion-text-color, #3c4043);
   font-weight: 600;
   height: 48px;
   width: 100%;
