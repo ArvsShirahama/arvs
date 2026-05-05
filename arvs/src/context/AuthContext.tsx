@@ -1,6 +1,9 @@
 import React, { useEffect, useState, useCallback } from 'react';
 import type { ReactNode } from 'react';
 import type { Session, User } from '@supabase/supabase-js';
+import { Capacitor } from '@capacitor/core';
+import { Browser } from '@capacitor/browser';
+import { App as CapApp } from '@capacitor/app';
 import { supabase } from '../supabaseClient';
 import type { Profile } from '../types/database';
 import { AuthContext } from './authContextValue';
@@ -51,7 +54,28 @@ export function AuthProvider({ children }: AuthProviderProps): React.JSX.Element
       setLoading(false);
     });
 
-    return () => subscription.unsubscribe();
+    // Listen for deep link callback from OAuth on native platforms
+    let appUrlListener: { remove: () => void } | undefined;
+    if (Capacitor.isNativePlatform()) {
+      CapApp.addListener('appUrlOpen', async ({ url }) => {
+        // Extract tokens from the redirect URL fragment
+        const hashPart = url.split('#')[1];
+        if (hashPart) {
+          const params = new URLSearchParams(hashPart);
+          const accessToken = params.get('access_token');
+          const refreshToken = params.get('refresh_token');
+          if (accessToken && refreshToken) {
+            await supabase.auth.setSession({ access_token: accessToken, refresh_token: refreshToken });
+          }
+        }
+        try { await Browser.close(); } catch { /* ignore */ }
+      }).then((listener) => { appUrlListener = listener; });
+    }
+
+    return () => {
+      subscription.unsubscribe();
+      appUrlListener?.remove();
+    };
   }, [fetchProfile]);
 
   const signUp = useCallback(async (
@@ -84,6 +108,23 @@ export function AuthProvider({ children }: AuthProviderProps): React.JSX.Element
   }, []);
 
   const signInWithGoogle = useCallback(async (): Promise<{ error: string | null }> => {
+    if (Capacitor.isNativePlatform()) {
+      // Native: get the URL and open in in-app browser
+      const { data, error } = await supabase.auth.signInWithOAuth({
+        provider: 'google',
+        options: {
+          redirectTo: 'com.arvin.arvs://tabs/chats',
+          skipBrowserRedirect: true,
+        },
+      });
+      if (error) return { error: error.message };
+      if (data?.url) {
+        await Browser.open({ url: data.url });
+      }
+      return { error: null };
+    }
+
+    // Web: default OAuth redirect
     const { error } = await supabase.auth.signInWithOAuth({
       provider: 'google',
       options: {

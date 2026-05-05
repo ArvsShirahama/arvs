@@ -79,27 +79,26 @@ export default function NewChatModal({ isOpen, onDismiss, onConversationCreated 
       return;
     }
 
-    // Create new conversation
-    const { data: newConvo, error: convoError } = await supabase
+    // Create new conversation (generate ID client-side to avoid RLS select issue)
+    const conversationId = crypto.randomUUID();
+    const { error: convoError } = await supabase
       .from('conversations')
-      .insert({})
-      .select()
-      .single();
+      .insert({ id: conversationId });
 
-    if (convoError || !newConvo) {
+    if (convoError) {
       setCreating(false);
       return;
     }
 
     await supabase.from('conversation_participants').insert([
-      { conversation_id: newConvo.id, user_id: user.id },
-      { conversation_id: newConvo.id, user_id: otherUser.id },
+      { conversation_id: conversationId, user_id: user.id },
+      { conversation_id: conversationId, user_id: otherUser.id },
     ]);
 
     setCreating(false);
     setQuery('');
     setResults([]);
-    onConversationCreated(newConvo.id);
+    onConversationCreated(conversationId);
   };
 
   const handleDismiss = () => {
