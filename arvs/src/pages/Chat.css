@@ -9,10 +9,27 @@
   padding-left: 0.25rem;
 }
 
+.chat-header-text {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+}
+
 .chat-header-title {
   padding: 0;
   font-size: 1.1rem;
   font-weight: 600;
+}
+
+.chat-header-status {
+  font-size: 0.7rem;
+  color: var(--ion-color-medium);
+  padding-left: 12px;
+  line-height: 1;
+}
+
+.chat-header-status.status-online {
+  color: #22c55e;
 }
 
 .chat-loading {

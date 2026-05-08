@@ -1,14 +1,16 @@
 import { useState, useRef } from 'react';
 import { IonIcon } from '@ionic/react';
-import { send } from 'ionicons/icons';
+import { send, camera, image } from 'ionicons/icons';
 import './MessageInput.css';
 
 interface MessageInputProps {
   onSend: (text: string) => void;
+  onPickGallery: () => void;
+  onOpenCamera: () => void;
   disabled?: boolean;
 }
 
-export default function MessageInput({ onSend, disabled }: MessageInputProps) {
+export default function MessageInput({ onSend, onPickGallery, onOpenCamera, disabled }: MessageInputProps) {
   const [text, setText] = useState('');
   const inputRef = useRef<HTMLTextAreaElement>(null);
 
@@ -29,6 +31,22 @@ export default function MessageInput({ onSend, disabled }: MessageInputProps) {
 
   return (
     <div className="message-input-bar">
+      <button
+        className="message-media-btn"
+        onClick={onOpenCamera}
+        disabled={disabled}
+        aria-label="Open camera"
+      >
+        <IonIcon icon={camera} />
+      </button>
+      <button
+        className="message-media-btn"
+        onClick={onPickGallery}
+        disabled={disabled}
+        aria-label="Pick from gallery"
+      >
+        <IonIcon icon={image} />
+      </button>
       <textarea
         ref={inputRef}
         className="message-input-field"

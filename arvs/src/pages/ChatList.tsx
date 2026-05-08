@@ -21,7 +21,7 @@ import NewChatModal from '../components/NewChatModal';
 import './ChatList.css';
 
 const ChatList: React.FC = () => {
-  const { user } = useAuth();
+  const { user, onlineUsers } = useAuth();
   const [conversations, setConversations] = useState<ConversationWithDetails[]>([]);
   const [loading, setLoading] = useState(true);
   const [showNewChat, setShowNewChat] = useState(false);
@@ -78,13 +78,49 @@ const ChatList: React.FC = () => {
         .eq('conversation_id', conv.id)
         .order('created_at', { ascending: false })
         .limit(1)
-        .single();
+        .maybeSingle();
+
+      // Get user's read position for this conversation
+      const { data: myParticipant } = await supabase
+        .from('conversation_participants')
+        .select('last_read_message_id')
+        .eq('conversation_id', conv.id)
+        .eq('user_id', user.id)
+        .maybeSingle();
+
+      // Count unread messages (from other user, after my last read)
+      let unreadCount = 0;
+      if (myParticipant?.last_read_message_id) {
+        const { data: lastReadMsg } = await supabase
+          .from('messages')
+          .select('created_at')
+          .eq('id', myParticipant.last_read_message_id)
+          .maybeSingle();
+        if (lastReadMsg) {
+          const { count } = await supabase
+            .from('messages')
+            .select('*', { count: 'exact', head: true })
+            .eq('conversation_id', conv.id)
+            .neq('sender_id', user.id)
+            .gt('created_at', lastReadMsg.created_at);
+          unreadCount = count ?? 0;
+        }
+      } else {
+        // Never read — count all messages from other user
+        const { count } = await supabase
+          .from('messages')
+          .select('*', { count: 'exact', head: true })
+          .eq('conversation_id', conv.id)
+          .neq('sender_id', user.id);
+        unreadCount = count ?? 0;
+      }
 
       results.push({
         id: conv.id,
         updated_at: conv.updated_at,
         other_user: otherProfile as Profile,
         last_message: (lastMsg as Message) ?? null,
+        unread_count: unreadCount,
       });
     }
 
@@ -104,6 +140,13 @@ const ChatList: React.FC = () => {
       .on(
         'postgres_changes',
         { event: 'INSERT', schema: 'public', table: 'messages' },
+        () => {
+          fetchConversations();
+        }
+      )
+      .on(
+        'postgres_changes',
+        { event: 'UPDATE', schema: 'public', table: 'messages' },
         () => {
           fetchConversations();
         }
@@ -137,7 +180,7 @@ const ChatList: React.FC = () => {
         ) : (
           <IonList lines="none" className="chatlist-list">
             {conversations.map((conv) => (
-              <ChatListItem key={conv.id} conversation={conv} currentUserId={user!.id} />
+              <ChatListItem key={conv.id} conversation={conv} currentUserId={user!.id} isOnline={onlineUsers.has(conv.other_user.id)} />
             ))}
           </IonList>
         )}

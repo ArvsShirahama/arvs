@@ -17,6 +17,7 @@ export function AuthProvider({ children }: AuthProviderProps): React.JSX.Element
   const [user, setUser] = useState<User | null>(null);
   const [profile, setProfile] = useState<Profile | null>(null);
   const [loading, setLoading] = useState(true);
+  const [onlineUsers, setOnlineUsers] = useState<Set<string>>(new Set());
 
   const fetchProfile = useCallback(async (userId: string) => {
     const { data } = await supabase
@@ -54,6 +55,33 @@ export function AuthProvider({ children }: AuthProviderProps): React.JSX.Element
       setLoading(false);
     });
 
+    // Presence tracking: join global channel and track this user
+    let presenceChannel: ReturnType<typeof supabase.channel> | undefined;
+    const setupPresence = (userId: string) => {
+      // Remove any existing channel first (handles React StrictMode re-mount)
+      const existing = supabase.getChannels().find((ch) => ch.topic === 'realtime:online-users');
+      if (existing) supabase.removeChannel(existing);
+
+      presenceChannel = supabase.channel('online-users', {
+        config: { presence: { key: userId } },
+      });
+      presenceChannel
+        .on('presence', { event: 'sync' }, () => {
+          const state = presenceChannel!.presenceState();
+          setOnlineUsers(new Set(Object.keys(state)));
+        })
+        .subscribe(async (status) => {
+          if (status === 'SUBSCRIBED') {
+            await presenceChannel!.track({ user_id: userId, online_at: new Date().toISOString() });
+          }
+        });
+    };
+
+    // Set up presence if user is already logged in
+    supabase.auth.getSession().then(({ data: { session: s } }) => {
+      if (s?.user) setupPresence(s.user.id);
+    });
+
     // Listen for deep link callback from OAuth on native platforms
     let appUrlListener: { remove: () => void } | undefined;
     if (Capacitor.isNativePlatform()) {
@@ -75,6 +103,10 @@ export function AuthProvider({ children }: AuthProviderProps): React.JSX.Element
     return () => {
       subscription.unsubscribe();
       appUrlListener?.remove();
+      if (presenceChannel) {
+        presenceChannel.untrack();
+        supabase.removeChannel(presenceChannel);
+      }
     };
   }, [fetchProfile]);
 
@@ -136,12 +168,15 @@ export function AuthProvider({ children }: AuthProviderProps): React.JSX.Element
   }, []);
 
   const signOut = useCallback(async () => {
+    if (user) {
+      await supabase.from('profiles').update({ last_seen: new Date().toISOString() }).eq('id', user.id);
+    }
     await supabase.auth.signOut();
     setProfile(null);
-  }, []);
+  }, [user]);
 
   return (
-    <AuthContext.Provider value={{ session, user, profile, loading, signUp, signIn, signInWithGoogle, signOut, refreshProfile }}>
+    <AuthContext.Provider value={{ session, user, profile, loading, onlineUsers, signUp, signIn, signInWithGoogle, signOut, refreshProfile }}>
       {children}
     </AuthContext.Provider>
   );

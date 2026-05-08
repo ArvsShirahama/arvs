@@ -13,6 +13,7 @@ create table if not exists public.profiles (
   username text unique not null,
   display_name text not null default '',
   avatar_url text,
+  last_seen timestamptz,
   created_at timestamptz not null default now()
 );
 
@@ -27,6 +28,8 @@ create table if not exists public.conversations (
 create table if not exists public.conversation_participants (
   conversation_id uuid not null references public.conversations(id) on delete cascade,
   user_id uuid not null references public.profiles(id) on delete cascade,
+  last_read_message_id uuid,
+  last_read_at timestamptz,
   created_at timestamptz not null default now(),
   primary key (conversation_id, user_id)
 );
@@ -36,7 +39,13 @@ create table if not exists public.messages (
   id uuid primary key default gen_random_uuid(),
   conversation_id uuid not null references public.conversations(id) on delete cascade,
   sender_id uuid not null references public.profiles(id) on delete cascade,
-  content text not null,
+  content text not null default '',
+  message_type text not null default 'text',
+  media_url text,
+  thumbnail_url text,
+  status text not null default 'sent',
+  delivered_at timestamptz,
+  read_at timestamptz,
   created_at timestamptz not null default now()
 );
 
@@ -127,6 +136,19 @@ create policy "Users can send messages in their conversations"
     and public.is_conversation_member(conversation_id)
   );
 
+create policy "Participants can update message status"
+  on public.messages for update
+  to authenticated
+  using (public.is_conversation_member(conversation_id))
+  with check (public.is_conversation_member(conversation_id));
+
+-- Conversation participants update policy (read position)
+create policy "Users can update their own read position"
+  on public.conversation_participants for update
+  to authenticated
+  using (user_id = auth.uid())
+  with check (user_id = auth.uid());
+
 -- ==============================
 -- STEP 5: INDEXES
 -- ==============================
@@ -176,9 +198,12 @@ create trigger on_new_message
   after insert on public.messages
   for each row execute function public.handle_new_message();
 
--- 8. STORAGE BUCKET for avatars
--- Note: Run these two lines separately if they fail in a batch
+-- 8. STORAGE BUCKETS
+-- Note: Run these lines separately if they fail in a batch
 insert into storage.buckets (id, name, public) values ('avatars', 'avatars', true)
+on conflict (id) do nothing;
+
+insert into storage.buckets (id, name, public) values ('chat-media', 'chat-media', true)
 on conflict (id) do nothing;
 
 drop policy if exists "Anyone can view avatars" on storage.objects;
@@ -204,10 +229,29 @@ create policy "Users can delete their own avatars"
   to authenticated
   using (bucket_id = 'avatars' and (storage.foldername(name))[1] = auth.uid()::text);
 
+-- Chat media storage policies
+drop policy if exists "Anyone can view chat media" on storage.objects;
+create policy "Anyone can view chat media"
+  on storage.objects for select
+  using (bucket_id = 'chat-media');
+
+drop policy if exists "Authenticated users can upload chat media" on storage.objects;
+create policy "Authenticated users can upload chat media"
+  on storage.objects for insert
+  to authenticated
+  with check (bucket_id = 'chat-media');
+
+drop policy if exists "Users can delete their own chat media" on storage.objects;
+create policy "Users can delete their own chat media"
+  on storage.objects for delete
+  to authenticated
+  using (bucket_id = 'chat-media' and (storage.foldername(name))[1] = auth.uid()::text);
+
 -- 9. ENABLE REALTIME on messages table
 -- Go to Supabase Dashboard → Database → Replication and enable the "messages" table
 -- Or run:
 alter publication supabase_realtime add table public.messages;
+alter publication supabase_realtime add table public.profiles;
 
 -- ============================================================
 -- DONE! Your database is ready for the Arvs Messenger app.

@@ -1,5 +1,30 @@
+.avatar-wrapper {
+  position: relative;
+  display: inline-flex;
+  flex-shrink: 0;
+}
+
 .avatar {
   flex-shrink: 0;
+}
+
+.avatar-status-dot {
+  position: absolute;
+  bottom: 1px;
+  right: 1px;
+  width: 12px;
+  height: 12px;
+  border-radius: 50%;
+  border: 2px solid var(--ion-background-color, #fff);
+  z-index: 1;
+}
+
+.avatar-online {
+  background-color: #22c55e;
+}
+
+.avatar-offline {
+  background-color: #9ca3af;
 }
 
 .avatar img {

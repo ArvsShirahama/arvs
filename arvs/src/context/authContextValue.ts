@@ -7,6 +7,7 @@ export interface AuthContextValue {
   user: User | null;
   profile: Profile | null;
   loading: boolean;
+  onlineUsers: Set<string>;
   signUp: (email: string, password: string, username: string, displayName: string) => Promise<{ error: string | null }>;
   signIn: (email: string, password: string) => Promise<{ error: string | null }>;
   signInWithGoogle: () => Promise<{ error: string | null }>;
@@ -19,6 +20,7 @@ export const AuthContext = createContext<AuthContextValue>({
   user: null,
   profile: null,
   loading: true,
+  onlineUsers: new Set(),
   signUp: async () => ({ error: null }),
   signIn: async () => ({ error: null }),
   signInWithGoogle: async () => ({ error: null }),

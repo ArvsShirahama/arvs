@@ -6,6 +6,8 @@ interface AvatarProps {
   name: string;
   size?: 'small' | 'medium' | 'large';
   onClick?: () => void;
+  showStatus?: boolean;
+  isOnline?: boolean;
 }
 
 function getInitials(name: string): string {
@@ -26,26 +28,35 @@ function hashColor(name: string): string {
   return `hsl(${hue}, 55%, 55%)`;
 }
 
-export default function Avatar({ src, name, size = 'medium', onClick }: AvatarProps) {
+export default function Avatar({ src, name, size = 'medium', onClick, showStatus = false, isOnline = false }: AvatarProps) {
   const sizeClass = `avatar-${size}`;
+  const statusDot = showStatus ? (
+    <span className={`avatar-status-dot ${isOnline ? 'avatar-online' : 'avatar-offline'}`} />
+  ) : null;
 
   if (src) {
     return (
-      <IonAvatar className={`avatar ${sizeClass}`} onClick={onClick}>
-        <img src={src} alt={name} />
-      </IonAvatar>
+      <div className="avatar-wrapper">
+        <IonAvatar className={`avatar ${sizeClass}`} onClick={onClick}>
+          <img src={src} alt={name} />
+        </IonAvatar>
+        {statusDot}
+      </div>
     );
   }
 
   return (
-    <div
-      className={`avatar avatar-initials ${sizeClass}`}
-      style={{ backgroundColor: hashColor(name) }}
-      onClick={onClick}
-      role={onClick ? 'button' : undefined}
-      tabIndex={onClick ? 0 : undefined}
-    >
-      <span>{getInitials(name)}</span>
+    <div className="avatar-wrapper">
+      <div
+        className={`avatar avatar-initials ${sizeClass}`}
+        style={{ backgroundColor: hashColor(name) }}
+        onClick={onClick}
+        role={onClick ? 'button' : undefined}
+        tabIndex={onClick ? 0 : undefined}
+      >
+        <span>{getInitials(name)}</span>
+      </div>
+      {statusDot}
     </div>
   );
 }
