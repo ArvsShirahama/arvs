@@ -1,135 +1,77 @@
-import { useState, useEffect, useCallback } from 'react';
+import { useCallback, useEffect, useState } from 'react';
 import {
-  IonPage,
   IonContent,
-  IonHeader,
-  IonToolbar,
-  IonTitle,
-  IonList,
   IonFab,
   IonFabButton,
+  IonHeader,
   IonIcon,
-  IonSpinner,
+  IonInfiniteScroll,
+  IonInfiniteScrollContent,
+  IonList,
+  IonPage,
+  IonSkeletonText,
   IonText,
+  IonTitle,
+  IonToolbar,
+  useIonRouter,
 } from '@ionic/react';
 import { add } from 'ionicons/icons';
-import { useAuth } from '../hooks/useAuth';
-import { supabase } from '../supabaseClient';
-import type { ConversationWithDetails, Profile, Message } from '../types/database';
 import ChatListItem from '../components/ChatListItem';
 import NewChatModal from '../components/NewChatModal';
+import { useAuth } from '../hooks/useAuth';
+import {
+  getConversationSummary,
+  getSummaries,
+  upsertSummaryFromRealtime,
+} from '../services/chatService';
+import { supabase } from '../supabaseClient';
+import type { ConversationWithDetails, Message } from '../types/database';
 import './ChatList.css';
+
+const SUMMARY_PAGE_SIZE = 30;
 
 const ChatList: React.FC = () => {
   const { user, onlineUsers } = useAuth();
+  const router = useIonRouter();
   const [conversations, setConversations] = useState<ConversationWithDetails[]>([]);
   const [loading, setLoading] = useState(true);
+  const [loadingMore, setLoadingMore] = useState(false);
+  const [hasMore, setHasMore] = useState(true);
+  const [nextCursor, setNextCursor] = useState<string | null>(null);
   const [showNewChat, setShowNewChat] = useState(false);
 
-  const fetchConversations = useCallback(async () => {
+  const fetchConversations = useCallback(async (reset = false) => {
     if (!user) return;
 
-    const { data: participantRows } = await supabase
-      .from('conversation_participants')
-      .select('conversation_id')
-      .eq('user_id', user.id);
-
-    if (!participantRows || participantRows.length === 0) {
-      setConversations([]);
+    if (reset) {
+      setLoading(true);
+      const firstPage = await getSummaries(user.id, SUMMARY_PAGE_SIZE, null);
+      setConversations(firstPage);
+      setHasMore(firstPage.length === SUMMARY_PAGE_SIZE);
+      setNextCursor(firstPage.length > 0 ? firstPage[firstPage.length - 1].updated_at : null);
       setLoading(false);
       return;
     }
 
-    const conversationIds = participantRows.map((r) => r.conversation_id);
+    if (loadingMore || !hasMore || !nextCursor) return;
 
-    const { data: convos } = await supabase
-      .from('conversations')
-      .select('*')
-      .in('id', conversationIds)
-      .order('updated_at', { ascending: false });
-
-    if (!convos) {
-      setConversations([]);
-      setLoading(false);
-      return;
-    }
-
-    const results: ConversationWithDetails[] = [];
-
-    for (const conv of convos) {
-      const { data: participants } = await supabase
-        .from('conversation_participants')
-        .select('user_id')
-        .eq('conversation_id', conv.id)
-        .neq('user_id', user.id);
-
-      const otherUserId = participants?.[0]?.user_id;
-      if (!otherUserId) continue;
-
-      const { data: otherProfile } = await supabase
-        .from('profiles')
-        .select('*')
-        .eq('id', otherUserId)
-        .single();
-
-      const { data: lastMsg } = await supabase
-        .from('messages')
-        .select('*')
-        .eq('conversation_id', conv.id)
-        .order('created_at', { ascending: false })
-        .limit(1)
-        .maybeSingle();
-
-      // Get user's read position for this conversation
-      const { data: myParticipant } = await supabase
-        .from('conversation_participants')
-        .select('last_read_message_id')
-        .eq('conversation_id', conv.id)
-        .eq('user_id', user.id)
-        .maybeSingle();
-
-      // Count unread messages (from other user, after my last read)
-      let unreadCount = 0;
-      if (myParticipant?.last_read_message_id) {
-        const { data: lastReadMsg } = await supabase
-          .from('messages')
-          .select('created_at')
-          .eq('id', myParticipant.last_read_message_id)
-          .maybeSingle();
-        if (lastReadMsg) {
-          const { count } = await supabase
-            .from('messages')
-            .select('*', { count: 'exact', head: true })
-            .eq('conversation_id', conv.id)
-            .neq('sender_id', user.id)
-            .gt('created_at', lastReadMsg.created_at);
-          unreadCount = count ?? 0;
-        }
-      } else {
-        // Never read — count all messages from other user
-        const { count } = await supabase
-          .from('messages')
-          .select('*', { count: 'exact', head: true })
-          .eq('conversation_id', conv.id)
-          .neq('sender_id', user.id);
-        unreadCount = count ?? 0;
-      }
-
-      results.push({
-        id: conv.id,
-        updated_at: conv.updated_at,
-        other_user: otherProfile as Profile,
-        last_message: (lastMsg as Message) ?? null,
-        unread_count: unreadCount,
+    setLoadingMore(true);
+    try {
+      const nextPage = await getSummaries(user.id, SUMMARY_PAGE_SIZE, nextCursor);
+      setConversations((prev) => {
+        const ids = new Set(prev.map((item) => item.id));
+        const deduped = nextPage.filter((item) => !ids.has(item.id));
+        return [...prev, ...deduped];
       });
+      setHasMore(nextPage.length === SUMMARY_PAGE_SIZE);
+      setNextCursor(nextPage.length > 0 ? nextPage[nextPage.length - 1].updated_at : nextCursor);
+    } finally {
+      setLoadingMore(false);
     }
-
-    setConversations(results);
-    setLoading(false);
-  }, [user]);
+  }, [user, hasMore, loadingMore, nextCursor]);
 
   useEffect(() => {
-    fetchConversations();
+    fetchConversations(true);
   }, [fetchConversations]);
 
   useEffect(() => {
@@ -140,15 +82,21 @@ const ChatList: React.FC = () => {
       .on(
         'postgres_changes',
         { event: 'INSERT', schema: 'public', table: 'messages' },
-        () => {
-          fetchConversations();
+        async (payload) => {
+          const message = payload.new as Message;
+          const summary = await getConversationSummary(message.conversation_id, user.id);
+          if (!summary) return;
+          setConversations((prev) => upsertSummaryFromRealtime(prev, summary));
         }
       )
       .on(
         'postgres_changes',
         { event: 'UPDATE', schema: 'public', table: 'messages' },
-        () => {
-          fetchConversations();
+        async (payload) => {
+          const message = payload.new as Message;
+          const summary = await getConversationSummary(message.conversation_id, user.id);
+          if (!summary) return;
+          setConversations((prev) => upsertSummaryFromRealtime(prev, summary));
         }
       )
       .subscribe();
@@ -156,7 +104,7 @@ const ChatList: React.FC = () => {
     return () => {
       supabase.removeChannel(channel);
     };
-  }, [user, fetchConversations]);
+  }, [user]);
 
   return (
     <IonPage>
@@ -167,9 +115,17 @@ const ChatList: React.FC = () => {
       </IonHeader>
       <IonContent className="chatlist-page">
         {loading ? (
-          <div className="chatlist-loading">
-            <IonSpinner name="crescent" />
-          </div>
+          <IonList lines="none" className="chatlist-list">
+            {[...Array(6)].map((_, idx) => (
+              <div key={idx} className="chatlist-skeleton-row">
+                <IonSkeletonText animated className="chatlist-skeleton-avatar" />
+                <div className="chatlist-skeleton-body">
+                  <IonSkeletonText animated className="chatlist-skeleton-line-lg" />
+                  <IonSkeletonText animated className="chatlist-skeleton-line-sm" />
+                </div>
+              </div>
+            ))}
+          </IonList>
         ) : conversations.length === 0 ? (
           <div className="chatlist-empty">
             <IonText color="medium">
@@ -180,10 +136,29 @@ const ChatList: React.FC = () => {
         ) : (
           <IonList lines="none" className="chatlist-list">
             {conversations.map((conv) => (
-              <ChatListItem key={conv.id} conversation={conv} currentUserId={user!.id} isOnline={onlineUsers.has(conv.other_user.id)} />
+              <ChatListItem
+                key={conv.id}
+                conversation={conv}
+                currentUserId={user!.id}
+                isOnline={onlineUsers.has(conv.other_user.id)}
+              />
             ))}
           </IonList>
         )}
+
+        <IonInfiniteScroll
+          disabled={loading || !hasMore}
+          threshold="100px"
+          onIonInfinite={async (event) => {
+            await fetchConversations(false);
+            (event.target as HTMLIonInfiniteScrollElement).complete();
+          }}
+        >
+          <IonInfiniteScrollContent
+            loadingSpinner="crescent"
+            loadingText={loadingMore ? 'Loading more chats...' : 'Loading more'}
+          />
+        </IonInfiniteScroll>
 
         <IonFab vertical="bottom" horizontal="end" slot="fixed">
           <IonFabButton onClick={() => setShowNewChat(true)}>
@@ -194,9 +169,9 @@ const ChatList: React.FC = () => {
         <NewChatModal
           isOpen={showNewChat}
           onDismiss={() => setShowNewChat(false)}
-          onConversationCreated={() => {
+          onConversationCreated={(conversationId) => {
             setShowNewChat(false);
-            fetchConversations();
+            router.push(`/chat/${conversationId}`, 'forward');
           }}
         />
       </IonContent>

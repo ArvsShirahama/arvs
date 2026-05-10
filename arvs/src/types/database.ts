@@ -45,3 +45,23 @@ export interface ConversationWithDetails {
   last_message: Message | null;
   unread_count: number;
 }
+
+export interface ConversationSummaryDTO {
+  conversation_id: string;
+  updated_at: string;
+  other_user: Profile;
+  last_message: Message | null;
+  unread_count: number;
+}
+
+export interface MessagePageCursor {
+  beforeCreatedAt: string | null;
+  limit: number;
+}
+
+export interface PaginatedMessagesState {
+  conversationId: string;
+  messages: Message[];
+  oldestCursor: string | null;
+  hasMore: boolean;
+}

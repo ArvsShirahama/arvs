@@ -4,6 +4,7 @@ import './ChatBubble.css';
 interface ChatBubbleProps {
   message: Message;
   isMine: boolean;
+  onMediaOpen?: (src: string, type: 'image' | 'video') => void;
 }
 
 function formatMessageTime(dateStr: string): string {
@@ -34,20 +35,26 @@ function StatusIcon({ status }: { status: MessageStatus }) {
   );
 }
 
-export default function ChatBubble({ message, isMine }: ChatBubbleProps) {
+export default function ChatBubble({ message, isMine, onMediaOpen }: ChatBubbleProps) {
   const isMedia = message.message_type === 'image' || message.message_type === 'video';
 
   return (
     <div className={`bubble-row ${isMine ? 'bubble-right' : 'bubble-left'}`}>
       <div className={`bubble ${isMine ? 'bubble-mine' : 'bubble-theirs'} ${isMedia ? 'bubble-media' : ''}`}>
         {message.message_type === 'image' && message.media_url && (
-          <img
-            className="bubble-image"
-            src={message.media_url}
-            alt="Photo"
-            loading="lazy"
-            onClick={() => window.open(message.media_url!, '_blank')}
-          />
+          <button
+            type="button"
+            className="bubble-image-button"
+            onClick={() => onMediaOpen?.(message.media_url!, 'image')}
+            aria-label="Open image"
+          >
+            <img
+              className="bubble-image"
+              src={message.media_url}
+              alt="Photo"
+              loading="lazy"
+            />
+          </button>
         )}
         {message.message_type === 'video' && message.media_url && (
           <video

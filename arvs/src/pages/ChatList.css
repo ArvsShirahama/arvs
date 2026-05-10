@@ -2,13 +2,6 @@
   --background: var(--ion-background-color);
 }
 
-.chatlist-loading {
-  display: flex;
-  justify-content: center;
-  align-items: center;
-  height: 50vh;
-}
-
 .chatlist-empty {
   display: flex;
   flex-direction: column;
@@ -29,4 +22,39 @@
 .chatlist-list {
   padding: 0.5rem 0;
   background: transparent;
+}
+
+.chatlist-skeleton-row {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+  padding: 0.75rem 1rem;
+  min-height: 72px;
+}
+
+.chatlist-skeleton-avatar {
+  width: 48px;
+  height: 48px;
+  border-radius: 50%;
+  margin: 0;
+  flex-shrink: 0;
+}
+
+.chatlist-skeleton-body {
+  flex: 1;
+  min-width: 0;
+}
+
+.chatlist-skeleton-line-lg {
+  width: 40%;
+  height: 14px;
+  border-radius: 6px;
+  margin: 0 0 0.35rem;
+}
+
+.chatlist-skeleton-line-sm {
+  width: 70%;
+  height: 12px;
+  border-radius: 6px;
+  margin: 0;
 }

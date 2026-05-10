@@ -1,7 +1,7 @@
 <?xml version='1.0' encoding='utf-8'?>
 <resources>
-    <string name="app_name">arvs</string>
-    <string name="title_activity_main">arvs</string>
-    <string name="package_name">io.ionic.starter</string>
-    <string name="custom_url_scheme">io.ionic.starter</string>
+    <string name="app_name">Hello</string>
+    <string name="title_activity_main">Hello</string>
+    <string name="package_name">com.arvin.arvs</string>
+    <string name="custom_url_scheme">com.arvin.arvs</string>
 </resources>

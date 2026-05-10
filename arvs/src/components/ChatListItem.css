@@ -13,6 +13,8 @@
 
 .chatlist-item-content {
   margin: 0;
+  min-width: 0;
+  flex: 1;
 }
 
 .chatlist-item-name {
@@ -28,7 +30,6 @@
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
-  max-width: 220px;
 }
 
 .chatlist-item-meta {

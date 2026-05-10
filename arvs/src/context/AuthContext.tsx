@@ -35,36 +35,24 @@ export function AuthProvider({ children }: AuthProviderProps): React.JSX.Element
   }, [user, fetchProfile]);
 
   useEffect(() => {
-    supabase.auth.getSession().then(({ data: { session: s } }) => {
-      setSession(s);
-      setUser(s?.user ?? null);
-      if (s?.user) {
-        fetchProfile(s.user.id);
-      }
-      setLoading(false);
-    });
-
-    const { data: { subscription } } = supabase.auth.onAuthStateChange((_event, s) => {
-      setSession(s);
-      setUser(s?.user ?? null);
-      if (s?.user) {
-        fetchProfile(s.user.id);
-      } else {
-        setProfile(null);
-      }
-      setLoading(false);
-    });
-
-    // Presence tracking: join global channel and track this user
     let presenceChannel: ReturnType<typeof supabase.channel> | undefined;
+
+    const teardownPresence = () => {
+      if (presenceChannel) {
+        presenceChannel.untrack();
+        supabase.removeChannel(presenceChannel);
+        presenceChannel = undefined;
+      }
+      setOnlineUsers(new Set());
+    };
+
     const setupPresence = (userId: string) => {
-      // Remove any existing channel first (handles React StrictMode re-mount)
-      const existing = supabase.getChannels().find((ch) => ch.topic === 'realtime:online-users');
-      if (existing) supabase.removeChannel(existing);
+      teardownPresence();
 
       presenceChannel = supabase.channel('online-users', {
         config: { presence: { key: userId } },
       });
+
       presenceChannel
         .on('presence', { event: 'sync' }, () => {
           const state = presenceChannel!.presenceState();
@@ -77,9 +65,29 @@ export function AuthProvider({ children }: AuthProviderProps): React.JSX.Element
         });
     };
 
-    // Set up presence if user is already logged in
     supabase.auth.getSession().then(({ data: { session: s } }) => {
-      if (s?.user) setupPresence(s.user.id);
+      setSession(s);
+      setUser(s?.user ?? null);
+      if (s?.user) {
+        fetchProfile(s.user.id);
+        setupPresence(s.user.id);
+      } else {
+        teardownPresence();
+      }
+      setLoading(false);
+    });
+
+    const { data: { subscription } } = supabase.auth.onAuthStateChange((_event, s) => {
+      setSession(s);
+      setUser(s?.user ?? null);
+      if (s?.user) {
+        fetchProfile(s.user.id);
+        setupPresence(s.user.id);
+      } else {
+        setProfile(null);
+        teardownPresence();
+      }
+      setLoading(false);
     });
 
     // Listen for deep link callback from OAuth on native platforms
@@ -103,10 +111,7 @@ export function AuthProvider({ children }: AuthProviderProps): React.JSX.Element
     return () => {
       subscription.unsubscribe();
       appUrlListener?.remove();
-      if (presenceChannel) {
-        presenceChannel.untrack();
-        supabase.removeChannel(presenceChannel);
-      }
+      teardownPresence();
     };
   }, [fetchProfile]);
 

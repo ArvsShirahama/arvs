@@ -10,6 +10,7 @@ import {
 } from '@ionic/react';
 import { useAuth } from '../hooks/useAuth';
 import GoogleLogo from '../components/GoogleLogo';
+import './Auth.css';
 import './Login.css';
 
 const Login: React.FC = () => {
@@ -19,6 +20,7 @@ const Login: React.FC = () => {
   const [password, setPassword] = useState('');
   const [error, setError] = useState('');
   const [loading, setLoading] = useState(false);
+  const [googleLoading, setGoogleLoading] = useState(false);
 
   const handleLogin = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -37,12 +39,20 @@ const Login: React.FC = () => {
     }
   };
 
+  const handleGoogleSignIn = async () => {
+    setError('');
+    setGoogleLoading(true);
+    const { error: googleError } = await signInWithGoogle();
+    setGoogleLoading(false);
+    if (googleError) setError(googleError);
+  };
+
   return (
     <IonPage>
-      <IonContent className="ion-padding login-page" scrollY={false}>
+      <IonContent className="ion-padding login-page">
         <div className="auth-container">
           <div className="auth-header">
-            <h1 className="auth-title">Arvs</h1>
+            <h1 className="auth-title">Hello</h1>
             <p className="auth-subtitle">Sign in to continue</p>
           </div>
 
@@ -75,7 +85,7 @@ const Login: React.FC = () => {
             <IonButton
               expand="block"
               type="submit"
-              disabled={loading}
+              disabled={loading || googleLoading}
               className="auth-button"
             >
               {loading ? <IonSpinner name="crescent" /> : 'Sign In'}
@@ -89,11 +99,16 @@ const Login: React.FC = () => {
           <IonButton
             expand="block"
             fill="outline"
-            onClick={signInWithGoogle}
+            onClick={handleGoogleSignIn}
+            disabled={loading || googleLoading}
             className="auth-google-btn"
           >
-            <GoogleLogo />
-            Continue with Google
+            {googleLoading ? <IonSpinner name="crescent" /> : (
+              <>
+                <GoogleLogo />
+                Continue with Google
+              </>
+            )}
           </IonButton>
 
           <div className="auth-footer">

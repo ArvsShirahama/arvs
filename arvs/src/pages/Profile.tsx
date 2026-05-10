@@ -1,4 +1,4 @@
-import { useState, useRef } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import {
   IonPage,
   IonContent,
@@ -27,6 +27,11 @@ const Profile: React.FC = () => {
   const [username, setUsername] = useState(profile?.username ?? '');
   const [saving, setSaving] = useState(false);
   const [uploading, setUploading] = useState(false);
+
+  useEffect(() => {
+    setDisplayName(profile?.display_name ?? '');
+    setUsername(profile?.username ?? '');
+  }, [profile?.id, profile?.display_name, profile?.username]);
 
   const handleSave = async () => {
     if (!user) return;
