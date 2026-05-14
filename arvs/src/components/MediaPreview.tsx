@@ -11,19 +11,31 @@ import {
   IonTitle,
   IonToolbar,
 } from '@ionic/react';
-import { close, send } from 'ionicons/icons';
+import { close, documentOutline, send } from 'ionicons/icons';
+import { formatFileSize } from '../services/conversationThemes';
 import './MediaPreview.css';
 
 interface MediaPreviewProps {
   isOpen: boolean;
   src: string;
-  type: 'image' | 'video';
+  type: 'image' | 'video' | 'file';
+  fileName?: string;
+  fileSizeBytes?: number | null;
   sending?: boolean;
   onSend: (caption: string) => void;
   onCancel: () => void;
 }
 
-export default function MediaPreview({ isOpen, src, type, sending = false, onSend, onCancel }: MediaPreviewProps) {
+export default function MediaPreview({
+  isOpen,
+  src,
+  type,
+  fileName,
+  fileSizeBytes,
+  sending = false,
+  onSend,
+  onCancel,
+}: MediaPreviewProps) {
   const [caption, setCaption] = useState('');
 
   useEffect(() => {
@@ -61,8 +73,16 @@ export default function MediaPreview({ isOpen, src, type, sending = false, onSen
         <div className="media-preview-frame">
           {type === 'image' ? (
             <img src={src} alt="Preview" />
-          ) : (
+          ) : type === 'video' ? (
             <video src={src} controls autoPlay muted />
+          ) : (
+            <div className="media-preview-file-card">
+              <span className="media-preview-file-icon">
+                <IonIcon icon={documentOutline} />
+              </span>
+              <strong>{fileName || 'File attachment'}</strong>
+              <small>{formatFileSize(fileSizeBytes ?? null)}</small>
+            </div>
           )}
         </div>
       </IonContent>

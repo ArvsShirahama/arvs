@@ -69,7 +69,7 @@ const SignUp: React.FC = () => {
       <IonContent className="ion-padding signup-page">
         <div className="auth-container">
           <div className="auth-header">
-            <h1 className="auth-title">Hello</h1>
+            <h1 className="auth-title">Arvs</h1>
             <p className="auth-subtitle">Create your account</p>
           </div>
 

@@ -4,6 +4,8 @@ import type { Session, User } from '@supabase/supabase-js';
 import { Capacitor } from '@capacitor/core';
 import { Browser } from '@capacitor/browser';
 import { App as CapApp } from '@capacitor/app';
+import { PushNotifications } from '@capacitor/push-notifications';
+import { getStoredPushToken, removePushTokenRegistration } from '../services/pushService';
 import { supabase } from '../supabaseClient';
 import type { Profile } from '../types/database';
 import { AuthContext } from './authContextValue';
@@ -38,9 +40,17 @@ export function AuthProvider({ children }: AuthProviderProps): React.JSX.Element
     let presenceChannel: ReturnType<typeof supabase.channel> | undefined;
 
     const teardownPresence = () => {
+      try {
+        supabase.getChannels().forEach((ch) => {
+          if (ch.topic === 'realtime:online-users') {
+            ch.untrack().catch(() => {});
+            supabase.removeChannel(ch).catch(() => {});
+          }
+        });
+      } catch {
+        // ignore cleanup errors
+      }
       if (presenceChannel) {
-        presenceChannel.untrack();
-        supabase.removeChannel(presenceChannel);
         presenceChannel = undefined;
       }
       setOnlineUsers(new Set());
@@ -48,6 +58,9 @@ export function AuthProvider({ children }: AuthProviderProps): React.JSX.Element
 
     const setupPresence = (userId: string) => {
       teardownPresence();
+
+      const existing = supabase.getChannels().find((ch) => ch.topic === 'realtime:online-users');
+      if (existing) return;
 
       presenceChannel = supabase.channel('online-users', {
         config: { presence: { key: userId } },
@@ -175,6 +188,21 @@ export function AuthProvider({ children }: AuthProviderProps): React.JSX.Element
   const signOut = useCallback(async () => {
     if (user) {
       await supabase.from('profiles').update({ last_seen: new Date().toISOString() }).eq('id', user.id);
+    }
+    const existingPushToken = getStoredPushToken();
+    if (existingPushToken) {
+      try {
+        await removePushTokenRegistration(existingPushToken);
+      } catch {
+        // best-effort cleanup before auth session is cleared
+      }
+    }
+    if (Capacitor.isNativePlatform()) {
+      try {
+        await PushNotifications.unregister();
+      } catch {
+        // ignore native cleanup failures
+      }
     }
     await supabase.auth.signOut();
     setProfile(null);

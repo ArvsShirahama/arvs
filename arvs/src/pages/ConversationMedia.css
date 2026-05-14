@@ -1,0 +1,110 @@
+.conversation-media-page {
+  --background: var(--app-page-background);
+}
+
+.conversation-media-shell {
+  padding: 0.9rem 1rem 1.5rem;
+}
+
+.conversation-media-shell ion-segment {
+  --background: var(--app-surface-elevated);
+  border: 1px solid var(--app-border-color);
+  border-radius: 16px;
+  box-shadow: var(--app-shadow-soft);
+}
+
+.conversation-media-shell ion-segment-button {
+  --color: var(--app-text-muted);
+  --color-checked: var(--ion-text-color);
+  --indicator-color: rgba(var(--ion-color-primary-rgb), 0.18);
+  min-height: 46px;
+}
+
+.conversation-media-loading,
+.conversation-media-empty {
+  min-height: 50vh;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  text-align: center;
+}
+
+.conversation-media-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 0.75rem;
+  margin-top: 1rem;
+}
+
+.conversation-media-card {
+  position: relative;
+  min-height: 180px;
+  border: 1px solid var(--app-border-color);
+  border-radius: 22px;
+  overflow: hidden;
+  background: var(--app-surface-muted);
+  padding: 0;
+  box-shadow: var(--app-shadow-soft);
+}
+
+.conversation-media-card img,
+.conversation-media-card video {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  display: block;
+}
+
+.conversation-media-video-badge,
+.conversation-media-timestamp {
+  position: absolute;
+  left: 0.7rem;
+  display: inline-flex;
+  align-items: center;
+  gap: 0.35rem;
+  padding: 0.35rem 0.6rem;
+  border-radius: 999px;
+  background: var(--conversation-badge-surface);
+  color: #fff;
+  font-size: 0.72rem;
+  backdrop-filter: blur(8px);
+}
+
+.conversation-media-video-badge {
+  top: 0.7rem;
+}
+
+.conversation-media-timestamp {
+  bottom: 0.7rem;
+}
+
+.conversation-file-list {
+  margin-top: 1rem;
+  background: transparent;
+}
+
+.conversation-file-item {
+  --background: var(--app-surface-elevated);
+  --padding-start: 0.9rem;
+  --padding-end: 0.9rem;
+  --inner-padding-end: 0.4rem;
+  border: 1px solid var(--app-border-color);
+  border-radius: 18px;
+  margin-bottom: 0.7rem;
+  box-shadow: var(--app-shadow-soft);
+}
+
+.conversation-file-item h3 {
+  color: var(--ion-text-color);
+}
+
+.conversation-file-item p,
+.conversation-file-item ion-note {
+  color: var(--app-text-muted);
+}
+
+@media (max-width: 420px) {
+  .conversation-media-grid {
+    grid-template-columns: 1fr;
+  }
+}

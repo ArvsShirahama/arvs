@@ -22,6 +22,31 @@ http://ionicframework.com/docs/theming/ */
   --ion-toolbar-background: #ffffff;
   --ion-tab-bar-background: #ffffff;
   --ion-tab-bar-border-color: #e5e7eb;
+
+  --app-page-background: #f7f6f2;
+  --app-surface-elevated: rgba(255, 255, 255, 0.9);
+  --app-surface-muted: rgba(247, 245, 239, 0.94);
+  --app-surface-strong: #ffffff;
+  --app-border-color: rgba(15, 23, 42, 0.08);
+  --app-border-strong: rgba(15, 23, 42, 0.12);
+  --app-text-muted: #6b7280;
+  --app-shadow-soft: 0 12px 28px rgba(15, 23, 42, 0.06);
+  --app-shadow-strong: 0 18px 40px rgba(15, 23, 42, 0.12);
+
+  --conversation-page-gradient: linear-gradient(180deg, #faf7f1 0%, #f1ede5 100%);
+  --conversation-preview-fallback: linear-gradient(135deg, #fbfaf6 0%, #f0ebe2 100%);
+  --conversation-image-overlay: linear-gradient(180deg, rgba(248, 250, 252, 0.14) 0%, rgba(248, 250, 252, 0.36) 100%);
+  --conversation-toolbar-surface-color: rgba(255, 255, 255, 0.88);
+  --conversation-input-surface-color: rgba(247, 245, 239, 0.94);
+  --conversation-input-border-color: rgba(15, 23, 42, 0.1);
+  --conversation-bubble-mine-color: var(--ion-color-primary);
+  --conversation-bubble-theirs-surface: rgba(255, 255, 255, 0.88);
+  --conversation-bubble-theirs-text-color: #1a1a2e;
+  --conversation-badge-surface: rgba(15, 23, 42, 0.62);
+  --conversation-file-button-theirs-bg: rgba(15, 23, 42, 0.05);
+  --conversation-file-icon-theirs-bg: rgba(15, 23, 42, 0.08);
+  --conversation-empty-pill-bg: rgba(255, 255, 255, 0.76);
+  --conversation-empty-pill-text: #111827;
 }
 
 @media (prefers-color-scheme: dark) {
@@ -36,5 +61,30 @@ http://ionicframework.com/docs/theming/ */
     --ion-color-light-tint: #2d2d4a;
     --ion-item-background: #16162a;
     --ion-card-background: #16162a;
+
+    --app-page-background: #0f0f1a;
+    --app-surface-elevated: rgba(22, 22, 42, 0.92);
+    --app-surface-muted: rgba(30, 30, 53, 0.92);
+    --app-surface-strong: #16162a;
+    --app-border-color: rgba(228, 228, 231, 0.08);
+    --app-border-strong: rgba(228, 228, 231, 0.14);
+    --app-text-muted: #a1a1aa;
+    --app-shadow-soft: 0 12px 30px rgba(0, 0, 0, 0.28);
+    --app-shadow-strong: 0 18px 40px rgba(0, 0, 0, 0.42);
+
+    --conversation-page-gradient: linear-gradient(180deg, #10121c 0%, #181b27 100%);
+    --conversation-preview-fallback: linear-gradient(135deg, #1b1f2d 0%, #0f111a 100%);
+    --conversation-image-overlay: linear-gradient(180deg, rgba(15, 23, 42, 0.16) 0%, rgba(2, 6, 23, 0.52) 100%);
+    --conversation-toolbar-surface-color: rgba(15, 15, 26, 0.84);
+    --conversation-input-surface-color: rgba(30, 30, 53, 0.9);
+    --conversation-input-border-color: rgba(228, 228, 231, 0.1);
+    --conversation-bubble-mine-color: #6159e8;
+    --conversation-bubble-theirs-surface: rgba(255, 255, 255, 0.1);
+    --conversation-bubble-theirs-text-color: #f4f4f5;
+    --conversation-badge-surface: rgba(2, 6, 23, 0.72);
+    --conversation-file-button-theirs-bg: rgba(255, 255, 255, 0.06);
+    --conversation-file-icon-theirs-bg: rgba(255, 255, 255, 0.1);
+    --conversation-empty-pill-bg: rgba(15, 23, 42, 0.58);
+    --conversation-empty-pill-text: #f8fafc;
   }
 }

@@ -33,6 +33,7 @@ function formatTime(dateStr: string): string {
 export default function ChatListItem({ conversation, currentUserId, isOnline = false }: ChatListItemProps) {
   const { other_user, last_message, unread_count } = conversation;
   const isOwnMessage = last_message?.sender_id === currentUserId;
+  const displayName = conversation.preference?.peer_nickname?.trim() || other_user.display_name || other_user.username;
 
   const getPreview = () => {
     if (!last_message) return 'No messages yet';
@@ -44,6 +45,11 @@ export default function ChatListItem({ conversation, currentUserId, isOnline = f
 
     if (last_message.message_type === 'video') {
       return `${prefix}[Video]${last_message.content ? ` - ${last_message.content}` : ''}`;
+    }
+
+    if (last_message.message_type === 'file') {
+      const fileName = last_message.media_name || last_message.content || 'File';
+      return `${prefix}[File] - ${fileName}`;
     }
 
     return `${prefix}${last_message.content}`;
@@ -61,14 +67,14 @@ export default function ChatListItem({ conversation, currentUserId, isOnline = f
     >
       <Avatar
         src={other_user.avatar_url}
-        name={other_user.display_name || other_user.username}
+        name={displayName}
         size="medium"
         showStatus
         isOnline={isOnline}
       />
       <IonLabel className="chatlist-item-content">
         <h2 className={`chatlist-item-name ${hasUnread ? 'chatlist-unread' : ''}`}>
-          {other_user.display_name || other_user.username}
+          {displayName}
         </h2>
         <p className={`chatlist-item-preview ${hasUnread ? 'chatlist-unread' : ''}`}>{preview}</p>
       </IonLabel>

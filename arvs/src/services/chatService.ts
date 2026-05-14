@@ -1,6 +1,7 @@
 import { supabase } from '../supabaseClient';
 import type {
   ConversationSummaryDTO,
+  ConversationPreference,
   ConversationWithDetails,
   Message,
   MessagePageCursor,
@@ -20,6 +21,7 @@ function mapSummaryRow(row: ConversationSummaryDTO): ConversationWithDetails {
     other_user: row.other_user,
     last_message: row.last_message,
     unread_count: row.unread_count ?? 0,
+    preference: row.preference,
   };
 }
 
@@ -36,7 +38,7 @@ async function getConversationSummaryFallback(
   const otherUserId = participants?.[0]?.user_id;
   if (!otherUserId) return null;
 
-  const [{ data: otherProfile }, { data: lastMsg }, { data: myParticipant }] = await Promise.all([
+  const [{ data: otherProfile }, { data: lastMsg }, { data: myParticipant }, { data: preference }] = await Promise.all([
     supabase.from('profiles').select('*').eq('id', otherUserId).single(),
     supabase
       .from('messages')
@@ -48,6 +50,12 @@ async function getConversationSummaryFallback(
     supabase
       .from('conversation_participants')
       .select('last_read_message_id')
+      .eq('conversation_id', conversationId)
+      .eq('user_id', currentUserId)
+      .maybeSingle(),
+    supabase
+      .from('conversation_preferences')
+      .select('*')
       .eq('conversation_id', conversationId)
       .eq('user_id', currentUserId)
       .maybeSingle(),
@@ -86,6 +94,7 @@ async function getConversationSummaryFallback(
     other_user: otherProfile as Profile,
     last_message: (lastMsg as Message) ?? null,
     unread_count: unreadCount,
+    preference: (preference as ConversationPreference | null) ?? null,
   };
 }
 

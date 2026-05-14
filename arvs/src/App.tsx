@@ -14,10 +14,13 @@ import { IonReactRouter } from '@ionic/react-router';
 import { chatbubblesOutline, personOutline } from 'ionicons/icons';
 import { useAuth } from './hooks/useAuth';
 
+import PushNotificationManager from './components/PushNotificationManager';
 import Login from './pages/Login';
 import SignUp from './pages/SignUp';
 import ChatList from './pages/ChatList';
 import Chat from './pages/Chat';
+import ConversationSettings from './pages/ConversationSettings';
+import ConversationMedia from './pages/ConversationMedia';
 import Profile from './pages/Profile';
 
 /* Core CSS required for Ionic components to work properly */
@@ -68,6 +71,7 @@ const App: React.FC = () => {
   return (
     <IonApp>
       <IonReactRouter>
+        <PushNotificationManager />
         <IonRouterOutlet>
           {/* Auth routes */}
           <Route exact path="/login">
@@ -80,6 +84,12 @@ const App: React.FC = () => {
           {/* Chat detail (outside tabs so tab bar is hidden) */}
           <Route exact path="/chat/:conversationId">
             {session ? <Chat /> : <Redirect to="/login" />}
+          </Route>
+          <Route exact path="/chat/:conversationId/settings">
+            {session ? <ConversationSettings /> : <Redirect to="/login" />}
+          </Route>
+          <Route exact path="/chat/:conversationId/media">
+            {session ? <ConversationMedia /> : <Redirect to="/login" />}
           </Route>
 
           {/* Tab routes */}

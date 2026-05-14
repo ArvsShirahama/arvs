@@ -99,6 +99,24 @@ const ChatList: React.FC = () => {
           setConversations((prev) => upsertSummaryFromRealtime(prev, summary));
         }
       )
+      .on(
+        'postgres_changes',
+        {
+          event: '*',
+          schema: 'public',
+          table: 'conversation_preferences',
+          filter: `user_id=eq.${user.id}`,
+        },
+        async (payload) => {
+          const conversationId = (payload.new as { conversation_id?: string } | null)?.conversation_id
+            ?? (payload.old as { conversation_id?: string } | null)?.conversation_id;
+          if (!conversationId) return;
+
+          const summary = await getConversationSummary(conversationId, user.id);
+          if (!summary) return;
+          setConversations((prev) => upsertSummaryFromRealtime(prev, summary));
+        }
+      )
       .subscribe();
 
     return () => {

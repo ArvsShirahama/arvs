@@ -1,10 +1,10 @@
 .message-input-footer {
-  border-top: 1px solid var(--ion-color-light-shade);
-  background: var(--ion-background-color);
+  border-top: 1px solid var(--app-border-color);
+  background: var(--conversation-toolbar-surface, var(--conversation-toolbar-surface-color));
 }
 
 .message-input-toolbar {
-  --background: var(--ion-background-color);
+  --background: var(--conversation-toolbar-surface, var(--conversation-toolbar-surface-color));
   --min-height: 58px;
   padding-bottom: var(--ion-safe-area-bottom, 0);
 }
@@ -38,19 +38,19 @@
   --padding-end: 0.85rem;
   --padding-top: 0.55rem;
   --padding-bottom: 0.55rem;
-  --background: var(--ion-color-light);
+  --background: var(--conversation-input-surface, var(--conversation-input-surface-color));
   --border-radius: 20px;
   --color: var(--ion-text-color);
   --placeholder-color: var(--ion-color-medium);
-  border: 1px solid var(--ion-color-light-shade);
+  border: 1px solid var(--conversation-input-border, var(--conversation-input-border-color));
   border-radius: 20px;
   font-size: 0.95rem;
   max-height: 140px;
 }
 
 .message-send-btn {
-  --background: var(--ion-color-primary);
-  --background-activated: var(--ion-color-primary-shade);
+  --background: var(--conversation-bubble-mine, var(--conversation-bubble-mine-color));
+  --background-activated: var(--conversation-bubble-mine, var(--conversation-bubble-mine-color));
   --color: #fff;
   --border-radius: 999px;
   --padding-start: 0;

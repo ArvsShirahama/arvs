@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState, type ChangeEvent, type CSSProperties } from 'react';
 import {
   IonActionSheet,
   IonBackButton,
@@ -6,14 +6,20 @@ import {
   IonButtons,
   IonContent,
   IonHeader,
+  IonIcon,
+  IonItem,
+  IonList,
   IonPage,
+  IonPopover,
   IonSpinner,
   IonTitle,
   IonToolbar,
+  useIonRouter,
   useIonToast,
 } from '@ionic/react';
 import { Camera, CameraResultType, CameraSource } from '@capacitor/camera';
 import { Capacitor } from '@capacitor/core';
+import { ellipsisVertical, imageOutline, settingsOutline } from 'ionicons/icons';
 import { useParams } from 'react-router-dom';
 import Avatar from '../components/Avatar';
 import ChatBubble from '../components/ChatBubble';
@@ -26,32 +32,70 @@ import {
   getMessagesPage,
   setCachedMessages,
 } from '../services/chatService';
+import { getConversationContext } from '../services/conversationService';
+import {
+  getConversationDisplayName,
+  getConversationTheme,
+} from '../services/conversationThemes';
+import { sendChatPush } from '../services/pushService';
 import { supabase } from '../supabaseClient';
-import type { Message, MessageType, Profile } from '../types/database';
+import type {
+  ConversationPreference,
+  Message,
+  MessageType,
+  Profile,
+} from '../types/database';
 import './Chat.css';
 
 interface ChatParams {
   conversationId: string;
 }
 
+interface MediaDraft {
+  src: string;
+  blob: Blob;
+  type: 'image' | 'video' | 'file';
+  fileName: string;
+  mimeType: string;
+  sizeBytes: number;
+}
+
 const MESSAGE_PAGE_SIZE = 30;
 const MAX_IMAGE_SIZE = 10 * 1024 * 1024;
 const MAX_VIDEO_SIZE = 50 * 1024 * 1024;
+const MAX_FILE_SIZE = 25 * 1024 * 1024;
+
+function sanitizeFileName(fileName: string): string {
+  return fileName.toLowerCase().replace(/[^a-z0-9._-]+/g, '-');
+}
+
+function fallbackFileName(type: MediaDraft['type'], mimeType: string): string {
+  if (type === 'image') {
+    return mimeType.includes('png') ? 'photo.png' : 'photo.jpg';
+  }
+  if (type === 'video') {
+    return mimeType.includes('webm') ? 'video.webm' : 'video.mp4';
+  }
+  return 'attachment';
+}
 
 const Chat: React.FC = () => {
   const { conversationId } = useParams<ChatParams>();
   const { user, onlineUsers } = useAuth();
+  const router = useIonRouter();
   const [presentToast] = useIonToast();
 
   const [messages, setMessages] = useState<Message[]>([]);
   const [otherUser, setOtherUser] = useState<Profile | null>(null);
+  const [preference, setPreference] = useState<ConversationPreference | null>(null);
   const [loading, setLoading] = useState(true);
   const [loadingOlder, setLoadingOlder] = useState(false);
   const [hasMoreMessages, setHasMoreMessages] = useState(true);
   const [oldestCursor, setOldestCursor] = useState<string | null>(null);
   const [sending, setSending] = useState(false);
+  const [showChatMenu, setShowChatMenu] = useState(false);
 
-  const [mediaPreview, setMediaPreview] = useState<{ src: string; blob: Blob; type: 'image' | 'video' } | null>(null);
+  const [mediaPreview, setMediaPreview] = useState<MediaDraft | null>(null);
   const [mediaViewer, setMediaViewer] = useState<{ src: string; type: 'image' | 'video' } | null>(null);
   const [showCaptureSheet, setShowCaptureSheet] = useState(false);
   const [showGallerySheet, setShowGallerySheet] = useState(false);
@@ -60,6 +104,7 @@ const Chat: React.FC = () => {
   const imageFileInputRef = useRef<HTMLInputElement>(null);
   const galleryVideoInputRef = useRef<HTMLInputElement>(null);
   const captureVideoInputRef = useRef<HTMLInputElement>(null);
+  const fileInputRef = useRef<HTMLInputElement>(null);
 
   const showToast = useCallback((message: string, color: 'danger' | 'warning' | 'success' = 'danger') => {
     presentToast({ message, color, duration: 2200, position: 'top' });
@@ -77,16 +122,35 @@ const Chat: React.FC = () => {
     });
   }, []);
 
-  const applyMediaPreview = useCallback((blob: Blob, type: 'image' | 'video', src: string) => {
-    const maxSize = type === 'video' ? MAX_VIDEO_SIZE : MAX_IMAGE_SIZE;
-    if (blob.size > maxSize) {
-      showToast(`File is too large. Max size: ${type === 'video' ? '50' : '10'} MB`, 'warning');
+  const notifyPush = useCallback(async (messageId: string) => {
+    try {
+      await sendChatPush(messageId);
+    } catch (error) {
+      console.warn('Push dispatch failed', error);
+    }
+  }, []);
+
+  const applyMediaPreview = useCallback((draft: MediaDraft) => {
+    const maxSize = draft.type === 'image'
+      ? MAX_IMAGE_SIZE
+      : draft.type === 'video'
+        ? MAX_VIDEO_SIZE
+        : MAX_FILE_SIZE;
+
+    if (draft.sizeBytes > maxSize) {
+      const maxSizeLabel = draft.type === 'image' ? '10 MB' : draft.type === 'video' ? '50 MB' : '25 MB';
+      showToast(`File is too large. Max size: ${maxSizeLabel}`, 'warning');
+      if (draft.src.startsWith('blob:')) {
+        URL.revokeObjectURL(draft.src);
+      }
       return;
     }
 
-    setMediaPreview((prev) => {
-      if (prev) revokePreviewUrl(prev.src);
-      return { src, blob, type };
+    setMediaPreview((previous) => {
+      if (previous) {
+        revokePreviewUrl(previous.src);
+      }
+      return draft;
     });
   }, [revokePreviewUrl, showToast]);
 
@@ -100,44 +164,34 @@ const Chat: React.FC = () => {
   }, []);
 
   const loadConversation = useCallback(async () => {
-    if (!user || !conversationId) return;
-
-    setLoading(true);
-
-    const { data: participants } = await supabase
-      .from('conversation_participants')
-      .select('user_id')
-      .eq('conversation_id', conversationId)
-      .neq('user_id', user.id);
-
-    const otherUserId = participants?.[0]?.user_id;
-    if (otherUserId) {
-      const { data: profile } = await supabase
-        .from('profiles')
-        .select('*')
-        .eq('id', otherUserId)
-        .single();
-      setOtherUser(profile as Profile | null);
-    }
-
-    const cached = getCachedMessages(conversationId);
-    if (cached) {
-      setMessages(cached.messages);
-      setOldestCursor(cached.oldestCursor);
-      setHasMoreMessages(cached.hasMore);
-      setLoading(false);
-      scrollToBottom();
+    if (!user || !conversationId) {
       return;
     }
 
+    setLoading(true);
+
     try {
+      const context = await getConversationContext(conversationId, user.id);
+      setOtherUser(context.otherUser);
+      setPreference(context.preference);
+
+      const cached = getCachedMessages(conversationId);
+      if (cached) {
+        setMessages(cached.messages);
+        setOldestCursor(cached.oldestCursor);
+        setHasMoreMessages(cached.hasMore);
+        setLoading(false);
+        scrollToBottom();
+        return;
+      }
+
       const page = await getMessagesPage(conversationId, { beforeCreatedAt: null, limit: MESSAGE_PAGE_SIZE });
       setMessages(page.messages);
       setOldestCursor(page.oldestCursor);
       setHasMoreMessages(page.hasMore);
       scrollToBottom();
     } catch {
-      showToast('Failed to load messages. Please try again.');
+      showToast('Failed to load this conversation. Please try again.');
       setMessages([]);
       setOldestCursor(null);
       setHasMoreMessages(false);
@@ -147,7 +201,7 @@ const Chat: React.FC = () => {
   }, [conversationId, scrollToBottom, showToast, user]);
 
   useEffect(() => {
-    loadConversation();
+    void loadConversation();
   }, [loadConversation]);
 
   useEffect(() => {
@@ -160,34 +214,36 @@ const Chat: React.FC = () => {
     });
   }, [conversationId, hasMoreMessages, loading, messages, oldestCursor]);
 
-  const markMessagesAsRead = useCallback(async (msgs: Message[]) => {
+  const markMessagesAsRead = useCallback(async (rows: Message[]) => {
     if (!user || !conversationId) return;
 
-    const unreadFromOther = msgs.filter((m) => m.sender_id !== user.id && m.status !== 'read');
+    const unreadFromOther = rows.filter((message) => message.sender_id !== user.id && message.status !== 'read');
     if (unreadFromOther.length === 0) return;
 
-    const ids = unreadFromOther.map((m) => m.id);
+    const ids = unreadFromOther.map((message) => message.id);
     await supabase
       .from('messages')
       .update({ status: 'read', read_at: new Date().toISOString() })
       .in('id', ids);
 
-    const lastMsg = unreadFromOther[unreadFromOther.length - 1];
+    const lastMessage = unreadFromOther[unreadFromOther.length - 1];
     await supabase
       .from('conversation_participants')
-      .update({ last_read_message_id: lastMsg.id, last_read_at: new Date().toISOString() })
+      .update({ last_read_message_id: lastMessage.id, last_read_at: new Date().toISOString() })
       .eq('conversation_id', conversationId)
       .eq('user_id', user.id);
   }, [conversationId, user]);
 
   useEffect(() => {
     if (!loading && messages.length > 0) {
-      markMessagesAsRead(messages);
+      void markMessagesAsRead(messages);
     }
   }, [loading, markMessagesAsRead, messages]);
 
   useEffect(() => {
-    if (!conversationId || !user) return;
+    if (!conversationId || !user) {
+      return;
+    }
 
     const channel = supabase
       .channel(`chat-${conversationId}`)
@@ -200,21 +256,23 @@ const Chat: React.FC = () => {
           filter: `conversation_id=eq.${conversationId}`,
         },
         async (payload) => {
-          const newMsg = payload.new as Message;
-          setMessages((prev) => {
-            if (prev.some((m) => m.id === newMsg.id)) return prev;
-            return [...prev, newMsg];
+          const newMessage = payload.new as Message;
+          setMessages((current) => {
+            if (current.some((message) => message.id === newMessage.id)) {
+              return current;
+            }
+            return [...current, newMessage];
           });
           scrollToBottom();
 
-          if (newMsg.sender_id !== user.id && newMsg.status === 'sent') {
+          if (newMessage.sender_id !== user.id && newMessage.status === 'sent') {
             await supabase
               .from('messages')
               .update({ status: 'read', read_at: new Date().toISOString() })
-              .eq('id', newMsg.id);
+              .eq('id', newMessage.id);
             await supabase
               .from('conversation_participants')
-              .update({ last_read_message_id: newMsg.id, last_read_at: new Date().toISOString() })
+              .update({ last_read_message_id: newMessage.id, last_read_at: new Date().toISOString() })
               .eq('conversation_id', conversationId)
               .eq('user_id', user.id);
           }
@@ -230,13 +288,35 @@ const Chat: React.FC = () => {
         },
         (payload) => {
           const updated = payload.new as Message;
-          setMessages((prev) => prev.map((m) => (m.id === updated.id ? updated : m)));
+          setMessages((current) => current.map((message) => (message.id === updated.id ? updated : message)));
+        }
+      )
+      .on(
+        'postgres_changes',
+        {
+          event: '*',
+          schema: 'public',
+          table: 'conversation_preferences',
+          filter: `conversation_id=eq.${conversationId}`,
+        },
+        (payload) => {
+          const nextRow = (payload.new || payload.old) as ConversationPreference | undefined;
+          if (!nextRow || nextRow.user_id !== user.id) {
+            return;
+          }
+
+          if (payload.eventType === 'DELETE') {
+            setPreference(null);
+            return;
+          }
+
+          setPreference(payload.new as ConversationPreference);
         }
       )
       .subscribe();
 
     return () => {
-      supabase.removeChannel(channel);
+      void supabase.removeChannel(channel);
     };
   }, [conversationId, scrollToBottom, user]);
 
@@ -249,7 +329,9 @@ const Chat: React.FC = () => {
   }, [mediaPreview, revokePreviewUrl]);
 
   const loadOlderMessages = async () => {
-    if (!conversationId || loadingOlder || !hasMoreMessages || !oldestCursor) return;
+    if (!conversationId || loadingOlder || !hasMoreMessages || !oldestCursor) {
+      return;
+    }
 
     setLoadingOlder(true);
     try {
@@ -258,10 +340,10 @@ const Chat: React.FC = () => {
         limit: MESSAGE_PAGE_SIZE,
       });
 
-      setMessages((prev) => {
-        const existing = new Set(prev.map((message) => message.id));
-        const older = page.messages.filter((message) => !existing.has(message.id));
-        return [...older, ...prev];
+      setMessages((current) => {
+        const existingIds = new Set(current.map((message) => message.id));
+        const olderMessages = page.messages.filter((message) => !existingIds.has(message.id));
+        return [...olderMessages, ...current];
       });
       setOldestCursor(page.oldestCursor);
       setHasMoreMessages(page.hasMore);
@@ -272,62 +354,95 @@ const Chat: React.FC = () => {
     }
   };
 
-  const uploadMedia = useCallback(async (blob: Blob, mediaType: 'image' | 'video'): Promise<string | null> => {
-    if (!user || !conversationId) return null;
+  const uploadMedia = useCallback(async (draft: MediaDraft): Promise<{ url: string; path: string } | null> => {
+    if (!user || !conversationId) {
+      return null;
+    }
 
-    const ext = mediaType === 'image' ? 'jpg' : (blob.type.includes('mp4') ? 'mp4' : 'webm');
-    const filePath = `${user.id}/${conversationId}/${Date.now()}.${ext}`;
+    const fileName = sanitizeFileName(draft.fileName || fallbackFileName(draft.type, draft.mimeType));
+    const filePath = `${user.id}/${conversationId}/${Date.now()}-${fileName}`;
 
     const { error } = await supabase.storage
       .from('chat-media')
-      .upload(filePath, blob, { contentType: blob.type || undefined });
-    if (error) return null;
+      .upload(filePath, draft.blob, {
+        contentType: draft.mimeType || undefined,
+      });
 
-    const { data: urlData } = supabase.storage.from('chat-media').getPublicUrl(filePath);
-    return urlData.publicUrl;
+    if (error) {
+      return null;
+    }
+
+    const { data } = supabase.storage.from('chat-media').getPublicUrl(filePath);
+    return { url: data.publicUrl, path: filePath };
   }, [conversationId, user]);
 
   const handleSend = async (text: string) => {
-    if (!user || !conversationId || sending) return;
+    if (!user || !conversationId || sending) {
+      return;
+    }
 
     setSending(true);
-    const { error } = await supabase.from('messages').insert({
-      conversation_id: conversationId,
-      sender_id: user.id,
-      content: text,
-    });
+    const { data, error } = await supabase
+      .from('messages')
+      .insert({
+        conversation_id: conversationId,
+        sender_id: user.id,
+        content: text,
+      })
+      .select('id')
+      .single();
     setSending(false);
 
     if (error) {
       showToast('Message failed to send.');
+      return;
+    }
+
+    if (data?.id) {
+      void notifyPush(data.id);
     }
   };
 
   const handleSendMedia = async (caption: string) => {
-    if (!user || !conversationId || !mediaPreview || sending) return;
-
-    setSending(true);
-    const url = await uploadMedia(mediaPreview.blob, mediaPreview.type);
-    if (!url) {
-      setSending(false);
-      showToast('Unable to upload media.');
+    if (!user || !conversationId || !mediaPreview || sending) {
       return;
     }
 
-    const { error } = await supabase.from('messages').insert({
-      conversation_id: conversationId,
-      sender_id: user.id,
-      content: caption,
-      message_type: mediaPreview.type as MessageType,
-      media_url: url,
-    });
+    setSending(true);
+    const uploaded = await uploadMedia(mediaPreview);
+    if (!uploaded) {
+      setSending(false);
+      showToast('Unable to upload attachment.');
+      return;
+    }
+
+    const { data, error } = await supabase
+      .from('messages')
+      .insert({
+        conversation_id: conversationId,
+        sender_id: user.id,
+        content: caption,
+        message_type: mediaPreview.type as MessageType,
+        media_url: uploaded.url,
+        media_path: uploaded.path,
+        media_name: mediaPreview.fileName,
+        media_mime_type: mediaPreview.mimeType,
+        media_size_bytes: mediaPreview.sizeBytes,
+      })
+      .select('id')
+      .single();
 
     revokePreviewUrl(mediaPreview.src);
     setMediaPreview(null);
     setSending(false);
 
     if (error) {
-      showToast('Unable to send media.');
+      showToast('Unable to send attachment.');
+      return;
+    }
+
+    if (data?.id) {
+      void notifyPush(data.id);
     }
   };
 
@@ -339,7 +454,9 @@ const Chat: React.FC = () => {
         resultType: CameraResultType.Uri,
       });
 
-      if (!photo.webPath) return;
+      if (!photo.webPath) {
+        return;
+      }
 
       const blob = await fetchBlobFromWebPath(photo.webPath);
       if (!blob) {
@@ -347,7 +464,14 @@ const Chat: React.FC = () => {
         return;
       }
 
-      applyMediaPreview(blob, 'image', photo.webPath);
+      applyMediaPreview({
+        src: photo.webPath,
+        blob,
+        type: 'image',
+        fileName: `photo.${photo.format || 'jpg'}`,
+        mimeType: blob.type || 'image/jpeg',
+        sizeBytes: blob.size,
+      });
     } catch {
       // user cancellation is expected and should stay silent
     }
@@ -362,7 +486,9 @@ const Chat: React.FC = () => {
     try {
       const result = await Camera.pickImages({ quality: 85, limit: 1 });
       const selected = result.photos?.[0];
-      if (!selected?.webPath) return;
+      if (!selected?.webPath) {
+        return;
+      }
 
       const blob = await fetchBlobFromWebPath(selected.webPath);
       if (!blob) {
@@ -370,29 +496,87 @@ const Chat: React.FC = () => {
         return;
       }
 
-      applyMediaPreview(blob, 'image', selected.webPath);
+      applyMediaPreview({
+        src: selected.webPath,
+        blob,
+        type: 'image',
+        fileName: `photo.${selected.format || 'jpg'}`,
+        mimeType: blob.type || 'image/jpeg',
+        sizeBytes: blob.size,
+      });
     } catch {
       // user cancellation is expected and should stay silent
     }
   };
 
-  const handleImageFileSelected = (e: React.ChangeEvent<HTMLInputElement>) => {
-    const file = e.target.files?.[0];
-    if (!file) return;
+  const handleImageFileSelected = (event: ChangeEvent<HTMLInputElement>) => {
+    const file = event.target.files?.[0];
+    if (!file) {
+      return;
+    }
 
-    e.target.value = '';
-    applyMediaPreview(file, 'image', URL.createObjectURL(file));
+    event.target.value = '';
+    applyMediaPreview({
+      src: URL.createObjectURL(file),
+      blob: file,
+      type: 'image',
+      fileName: file.name,
+      mimeType: file.type || 'image/jpeg',
+      sizeBytes: file.size,
+    });
   };
 
-  const handleVideoFileSelected = (e: React.ChangeEvent<HTMLInputElement>) => {
-    const file = e.target.files?.[0];
-    if (!file) return;
+  const handleVideoFileSelected = (event: ChangeEvent<HTMLInputElement>) => {
+    const file = event.target.files?.[0];
+    if (!file) {
+      return;
+    }
 
-    e.target.value = '';
-    applyMediaPreview(file, 'video', URL.createObjectURL(file));
+    event.target.value = '';
+    applyMediaPreview({
+      src: URL.createObjectURL(file),
+      blob: file,
+      type: 'video',
+      fileName: file.name,
+      mimeType: file.type || 'video/mp4',
+      sizeBytes: file.size,
+    });
+  };
+
+  const handleFileSelected = (event: ChangeEvent<HTMLInputElement>) => {
+    const file = event.target.files?.[0];
+    if (!file) {
+      return;
+    }
+
+    event.target.value = '';
+    applyMediaPreview({
+      src: URL.createObjectURL(file),
+      blob: file,
+      type: 'file',
+      fileName: file.name,
+      mimeType: file.type || 'application/octet-stream',
+      sizeBytes: file.size,
+    });
   };
 
   const isOnline = otherUser ? onlineUsers.has(otherUser.id) : false;
+  const activeTheme = useMemo(() => getConversationTheme(preference?.theme_id), [preference?.theme_id]);
+
+  const themeVars = useMemo(() => ({
+    '--conversation-bubble-mine': activeTheme.bubbleMine,
+    '--conversation-bubble-theirs': activeTheme.bubbleTheirs,
+    '--conversation-bubble-theirs-text': activeTheme.bubbleTheirsText,
+    '--conversation-toolbar-surface': activeTheme.toolbarSurface,
+    '--conversation-input-surface': activeTheme.inputSurface,
+    '--conversation-input-border': activeTheme.inputBorder,
+  }) as CSSProperties, [activeTheme]);
+
+  const chatBackgroundStyle = useMemo(() => ({
+    backgroundImage: preference?.background_image_url
+      ? `${activeTheme.overlay}, url(${preference.background_image_url})`
+      : activeTheme.gradient,
+  }), [activeTheme, preference?.background_image_url]);
 
   const lastSeenText = useMemo(() => {
     if (!otherUser) return '';
@@ -413,12 +597,12 @@ const Chat: React.FC = () => {
     return `Last seen ${date.toLocaleDateString([], { month: 'short', day: 'numeric' })}`;
   }, [isOnline, otherUser]);
 
-  const displayName = otherUser?.display_name || otherUser?.username || 'Chat';
+  const displayName = getConversationDisplayName(otherUser, preference);
 
   return (
-    <IonPage>
+    <IonPage style={themeVars}>
       <IonHeader>
-        <IonToolbar>
+        <IonToolbar className="chat-toolbar">
           <IonButtons slot="start">
             <IonBackButton defaultHref="/tabs/chats" text="" />
           </IonButtons>
@@ -437,6 +621,11 @@ const Chat: React.FC = () => {
               <span className={`chat-header-status ${isOnline ? 'status-online' : ''}`}>{lastSeenText}</span>
             </div>
           </div>
+          <IonButtons slot="end">
+            <IonButton fill="clear" onClick={() => setShowChatMenu(true)} aria-label="Conversation options">
+              <IonIcon icon={ellipsisVertical} />
+            </IonButton>
+          </IonButtons>
         </IonToolbar>
       </IonHeader>
 
@@ -446,7 +635,7 @@ const Chat: React.FC = () => {
             <IonSpinner name="crescent" />
           </div>
         ) : (
-          <>
+          <div className="chat-stage" style={chatBackgroundStyle}>
             {hasMoreMessages && (
               <div className="chat-load-more-wrap">
                 <IonButton fill="clear" size="small" onClick={loadOlderMessages} disabled={loadingOlder}>
@@ -461,17 +650,17 @@ const Chat: React.FC = () => {
               </div>
             ) : (
               <div className="chat-messages">
-                {messages.map((msg) => (
+                {messages.map((message) => (
                   <ChatBubble
-                    key={msg.id}
-                    message={msg}
-                    isMine={msg.sender_id === user?.id}
+                    key={message.id}
+                    message={message}
+                    isMine={message.sender_id === user?.id}
                     onMediaOpen={(src, type) => setMediaViewer({ src, type })}
                   />
                 ))}
               </div>
             )}
-          </>
+          </div>
         )}
       </IonContent>
 
@@ -505,6 +694,13 @@ const Chat: React.FC = () => {
         capture="environment"
         style={{ display: 'none' }}
         onChange={handleVideoFileSelected}
+      />
+
+      <input
+        ref={fileInputRef}
+        type="file"
+        style={{ display: 'none' }}
+        onChange={handleFileSelected}
       />
 
       <IonActionSheet
@@ -549,20 +745,57 @@ const Chat: React.FC = () => {
             },
           },
           {
+            text: 'File',
+            handler: () => {
+              fileInputRef.current?.click();
+            },
+          },
+          {
             text: 'Cancel',
             role: 'cancel',
           },
         ]}
       />
 
+      <IonPopover isOpen={showChatMenu} onDidDismiss={() => setShowChatMenu(false)} className="chat-menu-popover">
+        <IonList lines="none">
+          <IonItem
+            button
+            detail={false}
+            onClick={() => {
+              setShowChatMenu(false);
+              router.push(`/chat/${conversationId}/settings`, 'forward');
+            }}
+          >
+            <IonIcon icon={settingsOutline} slot="start" />
+            Conversation Settings
+          </IonItem>
+          <IonItem
+            button
+            detail={false}
+            onClick={() => {
+              setShowChatMenu(false);
+              router.push(`/chat/${conversationId}/media`, 'forward');
+            }}
+          >
+            <IonIcon icon={imageOutline} slot="start" />
+            View All Media
+          </IonItem>
+        </IonList>
+      </IonPopover>
+
       <MediaPreview
         isOpen={!!mediaPreview}
         src={mediaPreview?.src ?? ''}
         type={mediaPreview?.type ?? 'image'}
+        fileName={mediaPreview?.fileName}
+        fileSizeBytes={mediaPreview?.sizeBytes ?? null}
         sending={sending}
         onSend={handleSendMedia}
         onCancel={() => {
-          if (!mediaPreview) return;
+          if (!mediaPreview) {
+            return;
+          }
           revokePreviewUrl(mediaPreview.src);
           setMediaPreview(null);
         }}

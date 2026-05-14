@@ -1,4 +1,8 @@
+import { Browser } from '@capacitor/browser';
+import { documentOutline } from 'ionicons/icons';
+import { IonIcon } from '@ionic/react';
 import type { Message, MessageStatus } from '../types/database';
+import { formatFileSize } from '../services/conversationThemes';
 import './ChatBubble.css';
 
 interface ChatBubbleProps {
@@ -36,7 +40,7 @@ function StatusIcon({ status }: { status: MessageStatus }) {
 }
 
 export default function ChatBubble({ message, isMine, onMediaOpen }: ChatBubbleProps) {
-  const isMedia = message.message_type === 'image' || message.message_type === 'video';
+  const isMedia = message.message_type === 'image' || message.message_type === 'video' || message.message_type === 'file';
 
   return (
     <div className={`bubble-row ${isMine ? 'bubble-right' : 'bubble-left'}`}>
@@ -63,6 +67,23 @@ export default function ChatBubble({ message, isMine, onMediaOpen }: ChatBubbleP
             controls
             preload="metadata"
           />
+        )}
+        {message.message_type === 'file' && message.media_url && (
+          <button
+            type="button"
+            className="bubble-file-button"
+            onClick={() => {
+              void Browser.open({ url: message.media_url! });
+            }}
+          >
+            <span className="bubble-file-icon">
+              <IonIcon icon={documentOutline} />
+            </span>
+            <span className="bubble-file-copy">
+              <strong>{message.media_name || 'File attachment'}</strong>
+              <small>{formatFileSize(message.media_size_bytes)}</small>
+            </span>
+          </button>
         )}
         {message.content && <p className="bubble-text">{message.content}</p>}
         <span className="bubble-time">

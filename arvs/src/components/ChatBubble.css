@@ -20,14 +20,14 @@
 }
 
 .bubble-mine {
-  background: var(--ion-color-primary);
+  background: var(--conversation-bubble-mine, var(--conversation-bubble-mine-color));
   color: #fff;
   border-bottom-right-radius: 4px;
 }
 
 .bubble-theirs {
-  background: var(--ion-color-light);
-  color: var(--ion-color-dark);
+  background: var(--conversation-bubble-theirs, var(--conversation-bubble-theirs-surface));
+  color: var(--conversation-bubble-theirs-text, var(--conversation-bubble-theirs-text-color));
   border-bottom-left-radius: 4px;
 }
 
@@ -90,4 +90,54 @@
   max-height: 300px;
   border-radius: 12px;
   display: block;
+}
+
+.bubble-file-button {
+  width: 100%;
+  border: 0;
+  padding: 0.75rem;
+  border-radius: 14px;
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+  background: rgba(255, 255, 255, 0.12);
+  color: inherit;
+  text-align: left;
+}
+
+.bubble-theirs .bubble-file-button {
+  background: var(--conversation-file-button-theirs-bg);
+}
+
+.bubble-file-icon {
+  width: 42px;
+  height: 42px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 12px;
+  background: rgba(255, 255, 255, 0.16);
+  flex-shrink: 0;
+}
+
+.bubble-theirs .bubble-file-icon {
+  background: var(--conversation-file-icon-theirs-bg);
+}
+
+.bubble-file-copy {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+}
+
+.bubble-file-copy strong,
+.bubble-file-copy small {
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.bubble-file-copy small {
+  opacity: 0.72;
+  margin-top: 0.15rem;
 }

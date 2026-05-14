@@ -2,11 +2,17 @@
   --background: var(--ion-background-color);
 }
 
+.chat-toolbar {
+  --background: var(--conversation-toolbar-surface, var(--conversation-toolbar-surface-color));
+  --backdrop-filter: blur(16px);
+}
+
 .chat-header-info {
   display: flex;
   align-items: center;
   gap: 0.5rem;
   padding-left: 0.25rem;
+  min-width: 0;
 }
 
 .chat-header-text {
@@ -39,24 +45,37 @@
   height: 50vh;
 }
 
+.chat-stage {
+  min-height: 100%;
+  background-color: var(--app-page-background);
+  background-size: cover;
+  background-position: center;
+  padding: 0.35rem 0 0.9rem;
+}
+
 .chat-empty {
   display: flex;
   justify-content: center;
   align-items: center;
-  height: 50vh;
-  color: var(--ion-color-medium);
+  min-height: 50vh;
+  color: var(--app-text-muted);
+  text-align: center;
 }
 
 .chat-messages {
   display: flex;
   flex-direction: column;
-  padding: 0.5rem 0 0.75rem;
-  min-height: 100%;
+  min-height: calc(100vh - 210px);
   justify-content: flex-end;
+  padding-bottom: 0.4rem;
 }
 
 .chat-load-more-wrap {
   display: flex;
   justify-content: center;
-  padding-top: 0.4rem;
+  padding-top: 0.25rem;
+}
+
+.chat-menu-popover ion-item {
+  --min-height: 48px;
 }
