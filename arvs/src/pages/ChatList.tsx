@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import {
   IonContent,
   IonFab,
@@ -40,6 +40,10 @@ const ChatList: React.FC = () => {
   const [nextCursor, setNextCursor] = useState<string | null>(null);
   const [showNewChat, setShowNewChat] = useState(false);
 
+  // Debounce ref for real-time updates
+  const updateTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const pendingUpdatesRef = useRef<Set<string>>(new Set());
+
   const fetchConversations = useCallback(async (reset = false) => {
     if (!user) return;
 
@@ -77,6 +81,31 @@ const ChatList: React.FC = () => {
   useEffect(() => {
     if (!user) return;
 
+    // Debounced function to batch real-time updates
+    const debouncedUpdate = (conversationId: string) => {
+      // Add to pending updates
+      pendingUpdatesRef.current.add(conversationId);
+
+      // Clear existing timeout
+      if (updateTimeoutRef.current) {
+        clearTimeout(updateTimeoutRef.current);
+      }
+
+      // Set new timeout - batch updates within 1 second
+      updateTimeoutRef.current = setTimeout(async () => {
+        const idsToRefresh = Array.from(pendingUpdatesRef.current);
+        pendingUpdatesRef.current.clear();
+
+        // Refresh all pending conversations
+        for (const convId of idsToRefresh) {
+          const summary = await getConversationSummary(convId, user.id);
+          if (summary) {
+            setConversations((prev) => upsertSummaryFromRealtime(prev, summary));
+          }
+        }
+      }, 1000);
+    };
+
     const channel = supabase
       .channel('chat-list-realtime')
       .on(
@@ -84,9 +113,7 @@ const ChatList: React.FC = () => {
         { event: 'INSERT', schema: 'public', table: 'messages' },
         async (payload) => {
           const message = payload.new as Message;
-          const summary = await getConversationSummary(message.conversation_id, user.id);
-          if (!summary) return;
-          setConversations((prev) => upsertSummaryFromRealtime(prev, summary));
+          debouncedUpdate(message.conversation_id);
         }
       )
       .on(
@@ -94,9 +121,7 @@ const ChatList: React.FC = () => {
         { event: 'UPDATE', schema: 'public', table: 'messages' },
         async (payload) => {
           const message = payload.new as Message;
-          const summary = await getConversationSummary(message.conversation_id, user.id);
-          if (!summary) return;
-          setConversations((prev) => upsertSummaryFromRealtime(prev, summary));
+          debouncedUpdate(message.conversation_id);
         }
       )
       .on(
@@ -112,15 +137,17 @@ const ChatList: React.FC = () => {
             ?? (payload.old as { conversation_id?: string } | null)?.conversation_id;
           if (!conversationId) return;
 
-          const summary = await getConversationSummary(conversationId, user.id);
-          if (!summary) return;
-          setConversations((prev) => upsertSummaryFromRealtime(prev, summary));
+          debouncedUpdate(conversationId);
         }
       )
       .subscribe();
 
     return () => {
       supabase.removeChannel(channel);
+      // Cleanup timeout on unmount
+      if (updateTimeoutRef.current) {
+        clearTimeout(updateTimeoutRef.current);
+      }
     };
   }, [user]);
 

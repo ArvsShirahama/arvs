@@ -42,12 +42,18 @@ export default function NewChatModal({ isOpen, onDismiss, onConversationCreated 
 
     setSearching(true);
     const searchTerm = `%${value.trim()}%`;
-    const { data } = await supabase
+    const { data, error } = await supabase
       .from('profiles')
       .select('*')
       .neq('id', user?.id)
       .or(`username.ilike.${searchTerm},display_name.ilike.${searchTerm}`)
       .limit(20);
+
+    if (error) {
+      console.error('Search error:', error);
+    } else {
+      console.log('Search results:', data?.length, 'users found');
+    }
 
     setResults((data as Profile[]) ?? []);
     setSearching(false);

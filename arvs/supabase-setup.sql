@@ -46,7 +46,9 @@ create table if not exists public.messages (
   status text not null default 'sent',
   delivered_at timestamptz,
   read_at timestamptz,
-  created_at timestamptz not null default now()
+  created_at timestamptz not null default now(),
+  constraint messages_message_type_check
+    check (message_type in ('text', 'image', 'video', 'file', 'audio'))
 );
 
 -- ==============================
@@ -241,17 +243,41 @@ create policy "Authenticated users can upload chat media"
   to authenticated
   with check (bucket_id = 'chat-media');
 
+drop policy if exists "Users can update their own chat media" on storage.objects;
+create policy "Users can update their own chat media"
+  on storage.objects for update
+  to authenticated
+  using (bucket_id = 'chat-media' and (storage.foldername(name))[1] = auth.uid()::text);
+
 drop policy if exists "Users can delete their own chat media" on storage.objects;
 create policy "Users can delete their own chat media"
   on storage.objects for delete
   to authenticated
   using (bucket_id = 'chat-media' and (storage.foldername(name))[1] = auth.uid()::text);
 
--- 9. ENABLE REALTIME on messages table
--- Go to Supabase Dashboard → Database → Replication and enable the "messages" table
--- Or run:
-alter publication supabase_realtime add table public.messages;
-alter publication supabase_realtime add table public.profiles;
+-- 9. ENABLE REALTIME on messages and profiles tables
+-- This enables real-time subscriptions for these tables
+-- Wrapped in exception handling to allow re-running without errors
+
+-- Enable realtime on messages table
+do $$
+begin
+  begin
+    alter publication supabase_realtime add table public.messages;
+  exception when duplicate_object then
+    null;  -- Already added, ignore
+  end;
+end $$;
+
+-- Enable realtime on profiles table
+do $$
+begin
+  begin
+    alter publication supabase_realtime add table public.profiles;
+  exception when duplicate_object then
+    null;  -- Already added, ignore
+  end;
+end $$;
 
 -- ============================================================
 -- DONE! Your database is ready for the Arvs Messenger app.

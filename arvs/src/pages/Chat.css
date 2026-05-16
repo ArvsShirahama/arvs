@@ -45,11 +45,24 @@
   height: 50vh;
 }
 
-.chat-stage {
-  min-height: 100%;
-  background-color: var(--app-page-background);
+.chat-background-fixed {
+  position: fixed;
+  top: 0;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  z-index: 0;
+  pointer-events: none;
   background-size: cover;
   background-position: center;
+  background-repeat: no-repeat;
+}
+
+.chat-stage {
+  position: relative;
+  z-index: 1;
+  background: transparent;
+  min-height: 100%;
   padding: 0.35rem 0 0.9rem;
 }
 
@@ -68,6 +81,8 @@
   min-height: calc(100vh - 210px);
   justify-content: flex-end;
   padding-bottom: 0.4rem;
+  position: relative;
+  z-index: 1;
 }
 
 .chat-load-more-wrap {

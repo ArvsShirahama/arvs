@@ -30,6 +30,31 @@ export function AuthProvider({ children }: AuthProviderProps): React.JSX.Element
     setProfile(data as Profile | null);
   }, []);
 
+  // Subscribe to realtime profile updates to keep profile in sync
+  useEffect(() => {
+    if (!user) return;
+
+    const channel = supabase
+      .channel('profile-updates')
+      .on(
+        'postgres_changes',
+        {
+          event: 'UPDATE',
+          schema: 'public',
+          table: 'profiles',
+          filter: `id=eq.${user.id}`,
+        },
+        (payload) => {
+          setProfile(payload.new as Profile);
+        }
+      )
+      .subscribe();
+
+    return () => {
+      supabase.removeChannel(channel);
+    };
+  }, [user]);
+
   const refreshProfile = useCallback(async () => {
     if (user) {
       await fetchProfile(user.id);

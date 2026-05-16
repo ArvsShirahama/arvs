@@ -114,9 +114,12 @@ const Login: React.FC = () => {
           <div className="auth-footer">
             <IonText>
               Don&apos;t have an account?{' '}
-              <a href="/signup" onClick={(e) => { e.preventDefault(); router.push('/signup', 'forward'); }}>
+              <span
+                onClick={() => router.push('/signup', 'forward')}
+                style={{ color: 'var(--ion-color-primary)', cursor: 'pointer', textDecoration: 'underline' }}
+              >
                 Sign Up
-              </a>
+              </span>
             </IonText>
           </div>
         </div>

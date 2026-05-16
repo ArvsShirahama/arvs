@@ -1,0 +1,39 @@
+.image-cropper-modal {
+  --height: 100%;
+}
+
+.cropper-modal-content {
+  --background: var(--app-page-background);
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+}
+
+.cropper-container {
+  flex: 1;
+  position: relative;
+  background: #000;
+  min-height: 300px;
+}
+
+.cropper-controls {
+  padding: 1rem;
+  background: var(--app-surface-elevated);
+  border-top: 1px solid var(--app-border-color);
+}
+
+.zoom-control {
+  padding: 0 0.5rem;
+}
+
+.cropper-actions {
+  display: flex;
+  gap: 0.75rem;
+  padding: 1rem;
+  background: var(--app-surface-elevated);
+  border-top: 1px solid var(--app-border-color);
+}
+
+.cropper-actions ion-button {
+  flex: 1;
+}

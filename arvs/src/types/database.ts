@@ -46,7 +46,7 @@ export interface PushToken {
 }
 
 export type MessageStatus = 'sent' | 'delivered' | 'read';
-export type MessageType = 'text' | 'image' | 'video' | 'file';
+export type MessageType = 'text' | 'image' | 'video' | 'file' | 'audio';
 
 export interface Message {
   id: string;

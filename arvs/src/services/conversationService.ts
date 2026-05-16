@@ -152,6 +152,63 @@ export async function uploadConversationBackground(args: {
   };
 }
 
+export async function uploadConversationBackgroundWithProgress(args: {
+  conversationId: string;
+  userId: string;
+  blob: Blob;
+  fileName: string;
+  contentType?: string;
+  previousPath?: string | null;
+  onProgress?: (percent: number) => void;
+}): Promise<{ backgroundImageUrl: string; backgroundImagePath: string }> {
+  const filePath = createFilePath(args.userId, args.conversationId, args.fileName);
+  
+  // Supabase JS doesn't support upload progress natively
+  // Simulate progress for better UX
+  let progressInterval: ReturnType<typeof setInterval> | null = null;
+  if (args.onProgress) {
+    let progress = 0;
+    progressInterval = setInterval(() => {
+      progress += Math.random() * 15;
+      if (progress > 90) {
+        if (progressInterval) clearInterval(progressInterval);
+        return;
+      }
+      args.onProgress!(Math.min(progress, 90));
+    }, 200);
+  }
+  
+  const { error } = await supabase.storage
+    .from(CONVERSATION_BACKGROUND_BUCKET)
+    .upload(filePath, args.blob, {
+      contentType: args.contentType || args.blob.type || undefined,
+      upsert: false,
+    });
+  
+  if (progressInterval) {
+    clearInterval(progressInterval);
+  }
+  
+  if (args.onProgress) {
+    args.onProgress(100);
+  }
+  
+  if (error) throw error;
+  
+  if (args.previousPath) {
+    await deleteConversationBackgroundAsset(args.previousPath);
+  }
+  
+  const { data } = supabase.storage
+    .from(CONVERSATION_BACKGROUND_BUCKET)
+    .getPublicUrl(filePath);
+    
+  return {
+    backgroundImageUrl: data.publicUrl,
+    backgroundImagePath: filePath,
+  };
+}
+
 export async function getConversationMediaPage(
   conversationId: string,
   options: ConversationMediaPageOptions = {}

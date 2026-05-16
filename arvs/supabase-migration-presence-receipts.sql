@@ -32,7 +32,15 @@ CREATE POLICY "Users can update their own read position"
   WITH CHECK (user_id = auth.uid());
 
 -- 6. Enable realtime on profiles (for last_seen updates)
-ALTER PUBLICATION supabase_realtime ADD TABLE public.profiles;
+-- Wrapped in exception handling to allow re-running without errors
+do $$
+begin
+  begin
+    alter publication supabase_realtime add table public.profiles;
+  exception when duplicate_object then
+    null;  -- Already added, ignore
+  end;
+end $$;
 
 -- ============================================================
 -- DONE! Now deploy the updated frontend code.

@@ -11,8 +11,13 @@ import type {
 
 const DEFAULT_SUMMARY_PAGE_SIZE = 30;
 const DEFAULT_MESSAGE_PAGE_SIZE = 30;
+const CACHE_TTL_MS = 5 * 60 * 1000; // 5 minutes TTL for message cache
 
-const messageCache = new Map<string, PaginatedMessagesState>();
+interface CachedMessagesState extends PaginatedMessagesState {
+  cachedAt: number; // Timestamp when cache was created
+}
+
+const messageCache = new Map<string, CachedMessagesState>();
 
 function mapSummaryRow(row: ConversationSummaryDTO): ConversationWithDetails {
   return {
@@ -203,9 +208,19 @@ export function getCachedMessages(conversationId: string): PaginatedMessagesStat
   const cached = messageCache.get(conversationId);
   if (!cached) return null;
 
+  // Check if cache has expired
+  const now = Date.now();
+  if (now - cached.cachedAt > CACHE_TTL_MS) {
+    // Cache expired, remove it
+    messageCache.delete(conversationId);
+    return null;
+  }
+
   return {
-    ...cached,
+    conversationId: cached.conversationId,
     messages: [...cached.messages],
+    oldestCursor: cached.oldestCursor,
+    hasMore: cached.hasMore,
   };
 }
 
@@ -213,5 +228,28 @@ export function setCachedMessages(state: PaginatedMessagesState): void {
   messageCache.set(state.conversationId, {
     ...state,
     messages: [...state.messages],
+    cachedAt: Date.now(),
   });
+}
+
+/**
+ * Clear cache for a specific conversation
+ */
+export function clearCachedMessages(conversationId: string): void {
+  messageCache.delete(conversationId);
+}
+
+/**
+ * Clear all message caches
+ */
+export function clearAllMessageCaches(): void {
+  messageCache.clear();
+}
+
+/**
+ * Invalidates cache for a specific conversation when new messages arrive via real-time
+ * Ensures stale data is not served after real-time updates
+ */
+export function invalidateMessageCache(conversationId: string): void {
+  messageCache.delete(conversationId);
 }

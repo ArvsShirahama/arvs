@@ -23,6 +23,7 @@ import { ellipsisVertical, imageOutline, settingsOutline } from 'ionicons/icons'
 import { useParams } from 'react-router-dom';
 import Avatar from '../components/Avatar';
 import ChatBubble from '../components/ChatBubble';
+import ErrorBoundary from '../components/ErrorBoundary';
 import MediaPreview from '../components/MediaPreview';
 import MediaViewerModal from '../components/MediaViewerModal';
 import MessageInput from '../components/MessageInput';
@@ -30,6 +31,7 @@ import { useAuth } from '../hooks/useAuth';
 import {
   getCachedMessages,
   getMessagesPage,
+  invalidateMessageCache,
   setCachedMessages,
 } from '../services/chatService';
 import { getConversationContext } from '../services/conversationService';
@@ -257,6 +259,10 @@ const Chat: React.FC = () => {
         },
         async (payload) => {
           const newMessage = payload.new as Message;
+          
+          // Invalidate cache to ensure fresh data on next load
+          invalidateMessageCache(conversationId);
+          
           setMessages((current) => {
             if (current.some((message) => message.id === newMessage.id)) {
               return current;
@@ -572,11 +578,18 @@ const Chat: React.FC = () => {
     '--conversation-input-border': activeTheme.inputBorder,
   }) as CSSProperties, [activeTheme]);
 
-  const chatBackgroundStyle = useMemo(() => ({
-    backgroundImage: preference?.background_image_url
+  const chatBackgroundStyle = useMemo<CSSProperties>(() => {
+    const bgImage = preference?.background_image_url
       ? `${activeTheme.overlay}, url(${preference.background_image_url})`
-      : activeTheme.gradient,
-  }), [activeTheme, preference?.background_image_url]);
+      : activeTheme.gradient;
+      
+    return {
+      backgroundImage: bgImage,
+      backgroundSize: 'cover',
+      backgroundPosition: 'center',
+      backgroundRepeat: 'no-repeat',
+    };
+  }, [activeTheme, preference?.background_image_url]);
 
   const lastSeenText = useMemo(() => {
     if (!otherUser) return '';
@@ -630,38 +643,43 @@ const Chat: React.FC = () => {
       </IonHeader>
 
       <IonContent ref={contentRef} className="chat-page" fullscreen>
-        {loading ? (
-          <div className="chat-loading">
-            <IonSpinner name="crescent" />
-          </div>
-        ) : (
-          <div className="chat-stage" style={chatBackgroundStyle}>
-            {hasMoreMessages && (
-              <div className="chat-load-more-wrap">
-                <IonButton fill="clear" size="small" onClick={loadOlderMessages} disabled={loadingOlder}>
-                  {loadingOlder ? <IonSpinner name="crescent" /> : 'Load older messages'}
-                </IonButton>
-              </div>
-            )}
+        {/* Fixed background layer */}
+        <div className="chat-background-fixed" style={chatBackgroundStyle} />
+        
+        <ErrorBoundary>
+          {loading ? (
+            <div className="chat-loading">
+              <IonSpinner name="crescent" />
+            </div>
+          ) : (
+            <div className="chat-stage">
+              {hasMoreMessages && (
+                <div className="chat-load-more-wrap">
+                  <IonButton fill="clear" size="small" onClick={loadOlderMessages} disabled={loadingOlder}>
+                    {loadingOlder ? <IonSpinner name="crescent" /> : 'Load older messages'}
+                  </IonButton>
+                </div>
+              )}
 
-            {messages.length === 0 ? (
-              <div className="chat-empty">
-                <p>No messages yet. Say hi!</p>
-              </div>
-            ) : (
-              <div className="chat-messages">
-                {messages.map((message) => (
-                  <ChatBubble
-                    key={message.id}
-                    message={message}
-                    isMine={message.sender_id === user?.id}
-                    onMediaOpen={(src, type) => setMediaViewer({ src, type })}
-                  />
-                ))}
-              </div>
-            )}
-          </div>
-        )}
+              {messages.length === 0 ? (
+                <div className="chat-empty">
+                  <p>No messages yet. Say hi!</p>
+                </div>
+              ) : (
+                <div className="chat-messages">
+                  {messages.map((message) => (
+                    <ChatBubble
+                      key={message.id}
+                      message={message}
+                      isMine={message.sender_id === user?.id}
+                      onMediaOpen={(src, type) => setMediaViewer({ src, type })}
+                    />
+                  ))}
+                </div>
+              )}
+            </div>
+          )}
+        </ErrorBoundary>
       </IonContent>
 
       <MessageInput

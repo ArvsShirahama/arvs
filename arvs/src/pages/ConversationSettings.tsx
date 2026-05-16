@@ -13,6 +13,7 @@ import {
   IonText,
   IonTitle,
   IonToolbar,
+  IonProgressBar,
   useIonRouter,
   useIonToast,
 } from '@ionic/react';
@@ -27,7 +28,7 @@ import {
   deleteConversationBackgroundAsset,
   getConversationContext,
   saveConversationPreference,
-  uploadConversationBackground,
+  uploadConversationBackgroundWithProgress,
 } from '../services/conversationService';
 import {
   DEFAULT_CONVERSATION_THEME_ID,
@@ -35,6 +36,8 @@ import {
   getConversationTheme,
 } from '../services/conversationThemes';
 import type { ConversationPreference, Profile } from '../types/database';
+import { validateImageFile, compressAndResizeImage } from '../utils/imageProcessor';
+import ImageCropperModal from '../components/ImageCropperModal';
 import './ConversationSettings.css';
 
 interface RouteParams {
@@ -61,6 +64,11 @@ export default function ConversationSettings() {
   const [nickname, setNickname] = useState('');
   const [backgroundSelection, setBackgroundSelection] = useState<BackgroundSelection | null>(null);
   const [removeBackground, setRemoveBackground] = useState(false);
+  const [showCropper, setShowCropper] = useState(false);
+  const [pendingImageSrc, setPendingImageSrc] = useState<string | null>(null);
+  const [uploadProgress, setUploadProgress] = useState(0);
+  const [isUploading, setIsUploading] = useState(false);
+  const [validationError, setValidationError] = useState<string | null>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
   const loadSettings = useCallback(async () => {
@@ -120,6 +128,22 @@ export default function ConversationSettings() {
     setRemoveBackground(false);
   };
 
+  const handleImageSelected = async (blob: Blob, fileName: string, previewUrl: string) => {
+    setValidationError(null);
+    
+    // Validate
+    const validation = validateImageFile(blob);
+    if (!validation.valid) {
+      setValidationError(validation.error || 'Invalid image');
+      await presentToast({ message: validation.error || 'Invalid image', duration: 3000, color: 'danger' });
+      return;
+    }
+    
+    // Show cropper
+    setPendingImageSrc(previewUrl);
+    setShowCropper(true);
+  };
+
   const pickBackground = async () => {
     if (!Capacitor.isNativePlatform()) {
       fileInputRef.current?.click();
@@ -127,7 +151,7 @@ export default function ConversationSettings() {
     }
 
     try {
-      const result = await Camera.pickImages({ quality: 85, limit: 1 });
+      const result = await Camera.pickImages({ quality: 100, limit: 1 });
       const image = result.photos?.[0];
       if (!image?.webPath) {
         return;
@@ -136,7 +160,7 @@ export default function ConversationSettings() {
       const response = await fetch(image.webPath);
       const blob = await response.blob();
       const extension = image.format || 'jpg';
-      applyBackgroundSelection(blob, `background.${extension}`, blob.type || 'image/jpeg', image.webPath);
+      await handleImageSelected(blob, `background.${extension}`, image.webPath);
     } catch {
       // silent on cancellation
     }
@@ -149,7 +173,7 @@ export default function ConversationSettings() {
     }
 
     event.target.value = '';
-    applyBackgroundSelection(file, file.name, file.type || 'image/jpeg', URL.createObjectURL(file));
+    void handleImageSelected(file, file.name, URL.createObjectURL(file));
   };
 
   const clearSelectedBackground = () => {
@@ -158,6 +182,26 @@ export default function ConversationSettings() {
       URL.revokeObjectURL(backgroundSelection.previewUrl);
     }
     setBackgroundSelection(null);
+  };
+
+  const handleCropConfirm = async (croppedBlob: Blob) => {
+    setShowCropper(false);
+    if (pendingImageSrc?.startsWith('blob:')) {
+      URL.revokeObjectURL(pendingImageSrc);
+    }
+    setPendingImageSrc(null);
+    
+    // Compress cropped image
+    const compressedBlob = await compressAndResizeImage(croppedBlob);
+    applyBackgroundSelection(compressedBlob, 'background.jpg', 'image/jpeg', URL.createObjectURL(compressedBlob));
+  };
+
+  const handleCropCancel = () => {
+    setShowCropper(false);
+    if (pendingImageSrc?.startsWith('blob:')) {
+      URL.revokeObjectURL(pendingImageSrc);
+    }
+    setPendingImageSrc(null);
   };
 
   const handleSave = async () => {
@@ -176,17 +220,22 @@ export default function ConversationSettings() {
       }
 
       if (backgroundSelection) {
-        const uploaded = await uploadConversationBackground({
+        setIsUploading(true);
+        setUploadProgress(0);
+        
+        const uploaded = await uploadConversationBackgroundWithProgress({
           conversationId,
           userId: user.id,
           blob: backgroundSelection.blob,
           fileName: backgroundSelection.fileName,
           contentType: backgroundSelection.contentType,
           previousPath: removeBackground ? null : preference?.background_image_path,
+          onProgress: (percent: number) => setUploadProgress(percent),
         });
 
         backgroundImageUrl = uploaded.backgroundImageUrl;
         backgroundImagePath = uploaded.backgroundImagePath;
+        setIsUploading(false);
       }
 
       const nextPreference = await saveConversationPreference(conversationId, user.id, {
@@ -299,6 +348,19 @@ export default function ConversationSettings() {
                 {!activeBackgroundUrl && <span className="conversation-background-empty">Using system appearance</span>}
               </div>
 
+              {validationError && (
+                <IonText color="danger" className="conversation-settings-error">
+                  {validationError}
+                </IonText>
+              )}
+
+              {isUploading && (
+                <div className="conversation-settings-progress">
+                  <IonProgressBar value={uploadProgress / 100} />
+                  <IonText className="progress-text">{uploadProgress}%</IonText>
+                </div>
+              )}
+
               <div className="conversation-background-actions">
                 <IonButton fill="outline" onClick={pickBackground}>
                   <IonIcon slot="start" icon={imagesOutline} />
@@ -342,6 +404,15 @@ export default function ConversationSettings() {
           style={{ display: 'none' }}
           onChange={handleFileSelected}
         />
+
+        {showCropper && pendingImageSrc && (
+          <ImageCropperModal
+            isOpen={showCropper}
+            imageSrc={pendingImageSrc}
+            onConfirm={handleCropConfirm}
+            onCancel={handleCropCancel}
+          />
+        )}
       </IonContent>
     </IonPage>
   );

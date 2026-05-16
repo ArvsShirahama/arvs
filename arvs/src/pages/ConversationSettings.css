@@ -152,3 +152,27 @@
 .conversation-settings-actions {
   margin: 0 1rem 1rem;
 }
+
+.conversation-settings-error {
+  display: block;
+  margin-top: 0.5rem;
+  font-size: 0.85rem;
+  font-weight: 500;
+}
+
+.conversation-settings-progress {
+  margin-top: 0.75rem;
+  display: flex;
+  flex-direction: column;
+  gap: 0.4rem;
+}
+
+.conversation-settings-progress ion-progress-bar {
+  --progress-background: var(--ion-color-success);
+}
+
+.progress-text {
+  font-size: 0.8rem;
+  color: var(--app-text-muted);
+  text-align: center;
+}
