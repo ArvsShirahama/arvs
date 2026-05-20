@@ -1,0 +1,129 @@
+/* ============================================================
+   IncomingCallOverlay Styles
+   ============================================================ */
+
+.incoming-call-overlay {
+  position: fixed;
+  top: 0;
+  left: 0;
+  right: 0;
+  z-index: 99999;
+  display: flex;
+  justify-content: center;
+  padding: 12px 16px;
+  padding-top: max(12px, env(safe-area-inset-top, 12px));
+  animation: incoming-slide-down 0.35s cubic-bezier(0.22, 1, 0.36, 1);
+}
+
+.incoming-call-card {
+  width: 100%;
+  max-width: 420px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 14px 16px;
+  border-radius: 16px;
+  background: rgba(30, 30, 50, 0.92);
+  backdrop-filter: blur(20px);
+  -webkit-backdrop-filter: blur(20px);
+  box-shadow: 0 8px 32px rgba(0, 0, 0, 0.4),
+              0 0 0 1px rgba(255, 255, 255, 0.08);
+}
+
+.incoming-call-info {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  flex: 1;
+  min-width: 0;
+}
+
+.incoming-call-avatar-ring {
+  flex-shrink: 0;
+  animation: avatar-ring-pulse 1.5s ease-in-out infinite;
+}
+
+.incoming-call-text {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+}
+
+.incoming-call-name {
+  color: #fff;
+  font-size: 16px;
+  font-weight: 600;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.incoming-call-label {
+  color: rgba(255, 255, 255, 0.55);
+  font-size: 13px;
+  font-weight: 400;
+}
+
+.incoming-call-actions {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-shrink: 0;
+}
+
+.incoming-call-btn {
+  width: 44px;
+  height: 44px;
+  border-radius: 50%;
+  border: none;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 22px;
+  color: #fff;
+  cursor: pointer;
+  transition: transform 0.15s, filter 0.15s;
+}
+
+.incoming-call-btn:active {
+  transform: scale(0.9);
+}
+
+.incoming-call-reject {
+  background: #ef4444;
+}
+
+.incoming-call-reject:active {
+  filter: brightness(0.85);
+}
+
+.incoming-call-accept {
+  background: #22c55e;
+}
+
+.incoming-call-accept:active {
+  filter: brightness(0.85);
+}
+
+/* Animations */
+@keyframes incoming-slide-down {
+  from {
+    opacity: 0;
+    transform: translateY(-100%);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+@keyframes avatar-ring-pulse {
+  0%, 100% {
+    filter: drop-shadow(0 0 0 rgba(34, 197, 94, 0));
+  }
+  50% {
+    filter: drop-shadow(0 0 8px rgba(34, 197, 94, 0.5));
+  }
+}

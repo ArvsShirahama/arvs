@@ -1,0 +1,212 @@
+/* ============================================================
+   VideoCallModal Styles
+   ============================================================ */
+
+.video-call-modal {
+  --background: #000;
+}
+
+.video-call-modal::part(content) {
+  --background: #000;
+}
+
+.video-call-container {
+  position: relative;
+  width: 100%;
+  height: 100%;
+  background: #111;
+  overflow: hidden;
+  display: flex;
+  flex-direction: column;
+}
+
+/* Remote video — fills entire screen */
+.video-call-remote {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  z-index: 1;
+  background: #1a1a2e;
+}
+
+/* Overlay shown while connecting (calling / ringing) */
+.video-call-connecting-overlay {
+  position: absolute;
+  inset: 0;
+  z-index: 5;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 12px;
+  background: linear-gradient(135deg, #1a1a2e 0%, #16213e 50%, #0f3460 100%);
+}
+
+.video-call-avatar {
+  width: 100px;
+  height: 100px;
+  border-radius: 50%;
+  object-fit: cover;
+  border: 3px solid rgba(255, 255, 255, 0.3);
+  animation: call-pulse 2s ease-in-out infinite;
+}
+
+.video-call-avatar-placeholder {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 40px;
+  font-weight: 600;
+  color: #fff;
+  background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+}
+
+.video-call-remote-name {
+  color: #fff;
+  font-size: 22px;
+  font-weight: 600;
+  text-shadow: 0 2px 8px rgba(0, 0, 0, 0.4);
+}
+
+.video-call-status-label {
+  color: rgba(255, 255, 255, 0.7);
+  font-size: 15px;
+  font-weight: 400;
+}
+
+/* Active call status bar */
+.video-call-status-bar {
+  position: absolute;
+  top: 0;
+  left: 0;
+  right: 0;
+  z-index: 10;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  padding: 52px 16px 10px;
+  background: linear-gradient(to bottom, rgba(0, 0, 0, 0.5), transparent);
+}
+
+.video-call-status-dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: #4ade80;
+  animation: dot-blink 1.5s ease-in-out infinite;
+}
+
+.video-call-status-text {
+  color: #fff;
+  font-size: 15px;
+  font-weight: 500;
+  font-variant-numeric: tabular-nums;
+}
+
+/* Local video — picture-in-picture */
+.video-call-local-wrap {
+  position: absolute;
+  top: 56px;
+  right: 16px;
+  width: 110px;
+  height: 155px;
+  border-radius: 14px;
+  overflow: hidden;
+  z-index: 15;
+  box-shadow: 0 4px 20px rgba(0, 0, 0, 0.5);
+  border: 2px solid rgba(255, 255, 255, 0.15);
+}
+
+.video-call-local {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  transform: scaleX(-1);
+  background: #222;
+}
+
+.video-call-local-off {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: #2d2d3f;
+  color: rgba(255, 255, 255, 0.5);
+  font-size: 28px;
+}
+
+/* Controls bar at bottom */
+.video-call-controls {
+  position: absolute;
+  bottom: 0;
+  left: 0;
+  right: 0;
+  z-index: 20;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 24px;
+  padding: 20px 16px 40px;
+  background: linear-gradient(to top, rgba(0, 0, 0, 0.6), transparent);
+}
+
+.video-call-btn {
+  width: 56px;
+  height: 56px;
+  border-radius: 50%;
+  border: none;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 24px;
+  color: #fff;
+  background: rgba(255, 255, 255, 0.15);
+  backdrop-filter: blur(10px);
+  -webkit-backdrop-filter: blur(10px);
+  cursor: pointer;
+  transition: background 0.2s, transform 0.15s;
+}
+
+.video-call-btn:active {
+  transform: scale(0.92);
+}
+
+.video-call-btn-active {
+  background: rgba(255, 255, 255, 0.35);
+}
+
+.video-call-btn-hangup {
+  width: 64px;
+  height: 64px;
+  background: #ef4444;
+  font-size: 28px;
+  transform: rotate(135deg);
+}
+
+.video-call-btn-hangup:active {
+  transform: rotate(135deg) scale(0.92);
+  background: #dc2626;
+}
+
+/* Animations */
+@keyframes call-pulse {
+  0%, 100% {
+    box-shadow: 0 0 0 0 rgba(255, 255, 255, 0.3);
+  }
+  50% {
+    box-shadow: 0 0 0 20px rgba(255, 255, 255, 0);
+  }
+}
+
+@keyframes dot-blink {
+  0%, 100% {
+    opacity: 1;
+  }
+  50% {
+    opacity: 0.4;
+  }
+}

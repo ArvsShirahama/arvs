@@ -1,6 +1,7 @@
-import { useCallback, useEffect, useMemo, useRef, useState, type ChangeEvent, type CSSProperties } from 'react';
+import { useCallback, useMemo, useRef, useState, type CSSProperties } from 'react';
 import {
   IonActionSheet,
+  IonAlert,
   IonBackButton,
   IonButton,
   IonButtons,
@@ -17,9 +18,7 @@ import {
   useIonRouter,
   useIonToast,
 } from '@ionic/react';
-import { Camera, CameraResultType, CameraSource } from '@capacitor/camera';
-import { Capacitor } from '@capacitor/core';
-import { ellipsisVertical, imageOutline, settingsOutline } from 'ionicons/icons';
+import { ellipsisVertical, imageOutline, settingsOutline, videocamOutline } from 'ionicons/icons';
 import { useParams } from 'react-router-dom';
 import Avatar from '../components/Avatar';
 import ChatBubble from '../components/ChatBubble';
@@ -27,58 +26,24 @@ import ErrorBoundary from '../components/ErrorBoundary';
 import MediaPreview from '../components/MediaPreview';
 import MediaViewerModal from '../components/MediaViewerModal';
 import MessageInput from '../components/MessageInput';
+import VideoCallModal from '../components/VideoCallModal';
+import IncomingCallOverlay from '../components/IncomingCallOverlay';
+import { useVideoCall } from '../hooks/useVideoCall';
 import { useAuth } from '../hooks/useAuth';
-import {
-  getCachedMessages,
-  getMessagesPage,
-  invalidateMessageCache,
-  setCachedMessages,
-} from '../services/chatService';
-import { getConversationContext } from '../services/conversationService';
+import { useMessagePagination } from '../hooks/useMessagePagination';
+import { useChatRealtime } from '../hooks/useChatRealtime';
+import { useMediaCapture } from '../hooks/useMediaCapture';
+import { useTypingIndicator } from '../hooks/useTypingIndicator';
+import { supabase } from '../supabaseClient';
 import {
   getConversationDisplayName,
   getConversationTheme,
 } from '../services/conversationThemes';
-import { sendChatPush } from '../services/pushService';
-import { supabase } from '../supabaseClient';
-import type {
-  ConversationPreference,
-  Message,
-  MessageType,
-  Profile,
-} from '../types/database';
+import type { Message } from '../types/database';
 import './Chat.css';
 
 interface ChatParams {
   conversationId: string;
-}
-
-interface MediaDraft {
-  src: string;
-  blob: Blob;
-  type: 'image' | 'video' | 'file';
-  fileName: string;
-  mimeType: string;
-  sizeBytes: number;
-}
-
-const MESSAGE_PAGE_SIZE = 30;
-const MAX_IMAGE_SIZE = 10 * 1024 * 1024;
-const MAX_VIDEO_SIZE = 50 * 1024 * 1024;
-const MAX_FILE_SIZE = 25 * 1024 * 1024;
-
-function sanitizeFileName(fileName: string): string {
-  return fileName.toLowerCase().replace(/[^a-z0-9._-]+/g, '-');
-}
-
-function fallbackFileName(type: MediaDraft['type'], mimeType: string): string {
-  if (type === 'image') {
-    return mimeType.includes('png') ? 'photo.png' : 'photo.jpg';
-  }
-  if (type === 'video') {
-    return mimeType.includes('webm') ? 'video.webm' : 'video.mp4';
-  }
-  return 'attachment';
 }
 
 const Chat: React.FC = () => {
@@ -87,20 +52,18 @@ const Chat: React.FC = () => {
   const router = useIonRouter();
   const [presentToast] = useIonToast();
 
-  const [messages, setMessages] = useState<Message[]>([]);
-  const [otherUser, setOtherUser] = useState<Profile | null>(null);
-  const [preference, setPreference] = useState<ConversationPreference | null>(null);
-  const [loading, setLoading] = useState(true);
-  const [loadingOlder, setLoadingOlder] = useState(false);
-  const [hasMoreMessages, setHasMoreMessages] = useState(true);
-  const [oldestCursor, setOldestCursor] = useState<string | null>(null);
-  const [sending, setSending] = useState(false);
-  const [showChatMenu, setShowChatMenu] = useState(false);
+  const videoCall = useVideoCall(conversationId, user?.id);
 
-  const [mediaPreview, setMediaPreview] = useState<MediaDraft | null>(null);
   const [mediaViewer, setMediaViewer] = useState<{ src: string; type: 'image' | 'video' } | null>(null);
+  const [showChatMenu, setShowChatMenu] = useState(false);
   const [showCaptureSheet, setShowCaptureSheet] = useState(false);
   const [showGallerySheet, setShowGallerySheet] = useState(false);
+
+  // Edit state
+  const [editingMessage, setEditingMessage] = useState<{ id: string; content: string } | null>(null);
+
+  // Delete confirmation state
+  const [deleteTarget, setDeleteTarget] = useState<Message | null>(null);
 
   const contentRef = useRef<HTMLIonContentElement>(null);
   const imageFileInputRef = useRef<HTMLInputElement>(null);
@@ -112,459 +75,102 @@ const Chat: React.FC = () => {
     presentToast({ message, color, duration: 2200, position: 'top' });
   }, [presentToast]);
 
-  const revokePreviewUrl = useCallback((src: string) => {
-    if (src.startsWith('blob:')) {
-      URL.revokeObjectURL(src);
-    }
-  }, []);
-
   const scrollToBottom = useCallback(() => {
     requestAnimationFrame(() => {
       contentRef.current?.scrollToBottom(200);
     });
   }, []);
 
-  const notifyPush = useCallback(async (messageId: string) => {
-    try {
-      await sendChatPush(messageId);
-    } catch (error) {
-      console.warn('Push dispatch failed', error);
-    }
+  // Hook 1: Pagination, caching, and chat metadata fetching
+  const {
+    messages,
+    setMessages,
+    otherUser,
+    preference,
+    setPreference,
+    loading,
+    loadingOlder,
+    hasMoreMessages,
+    loadOlderMessages,
+  } = useMessagePagination(conversationId, scrollToBottom, showToast);
+
+  // Hook 2: Live realtime database updates and message receipts
+  useChatRealtime(conversationId, messages, loading, setMessages, setPreference, scrollToBottom);
+
+  // Hook 3: Native & Web media capture, storage uploading, and message dispatch
+  const {
+    mediaPreview,
+    sending,
+    takePhoto,
+    pickImageFromGallery,
+    handleImageFileSelected,
+    handleVideoFileSelected,
+    handleFileSelected,
+    handleSend: handleSendNewMessage,
+    handleSendMedia,
+    cancelMedia,
+  } = useMediaCapture(
+    conversationId,
+    showToast,
+    imageFileInputRef,
+    galleryVideoInputRef,
+    captureVideoInputRef,
+    fileInputRef
+  );
+
+  // Hook 4: Typing indicators
+  const { peerIsTyping, sendTyping } = useTypingIndicator(conversationId);
+
+  // ---- Message editing ----
+  const handleEditRequest = useCallback((message: Message) => {
+    setEditingMessage({ id: message.id, content: message.content });
   }, []);
 
-  const applyMediaPreview = useCallback((draft: MediaDraft) => {
-    const maxSize = draft.type === 'image'
-      ? MAX_IMAGE_SIZE
-      : draft.type === 'video'
-        ? MAX_VIDEO_SIZE
-        : MAX_FILE_SIZE;
-
-    if (draft.sizeBytes > maxSize) {
-      const maxSizeLabel = draft.type === 'image' ? '10 MB' : draft.type === 'video' ? '50 MB' : '25 MB';
-      showToast(`File is too large. Max size: ${maxSizeLabel}`, 'warning');
-      if (draft.src.startsWith('blob:')) {
-        URL.revokeObjectURL(draft.src);
-      }
-      return;
-    }
-
-    setMediaPreview((previous) => {
-      if (previous) {
-        revokePreviewUrl(previous.src);
-      }
-      return draft;
-    });
-  }, [revokePreviewUrl, showToast]);
-
-  const fetchBlobFromWebPath = useCallback(async (webPath: string): Promise<Blob | null> => {
-    try {
-      const response = await fetch(webPath);
-      return await response.blob();
-    } catch {
-      return null;
-    }
+  const handleCancelEdit = useCallback(() => {
+    setEditingMessage(null);
   }, []);
 
-  const loadConversation = useCallback(async () => {
-    if (!user || !conversationId) {
-      return;
-    }
+  const handleSend = useCallback(async (text: string) => {
+    if (editingMessage) {
+      // Save edit
+      const { error } = await supabase
+        .from('messages')
+        .update({ content: text, edited_at: new Date().toISOString() })
+        .eq('id', editingMessage.id);
 
-    setLoading(true);
-
-    try {
-      const context = await getConversationContext(conversationId, user.id);
-      setOtherUser(context.otherUser);
-      setPreference(context.preference);
-
-      const cached = getCachedMessages(conversationId);
-      if (cached) {
-        setMessages(cached.messages);
-        setOldestCursor(cached.oldestCursor);
-        setHasMoreMessages(cached.hasMore);
-        setLoading(false);
-        scrollToBottom();
-        return;
+      if (error) {
+        showToast('Failed to edit message.');
+      } else {
+        showToast('Message edited.', 'success');
       }
-
-      const page = await getMessagesPage(conversationId, { beforeCreatedAt: null, limit: MESSAGE_PAGE_SIZE });
-      setMessages(page.messages);
-      setOldestCursor(page.oldestCursor);
-      setHasMoreMessages(page.hasMore);
-      scrollToBottom();
-    } catch {
-      showToast('Failed to load this conversation. Please try again.');
-      setMessages([]);
-      setOldestCursor(null);
-      setHasMoreMessages(false);
-    } finally {
-      setLoading(false);
+      setEditingMessage(null);
+    } else {
+      // Normal send
+      handleSendNewMessage(text);
     }
-  }, [conversationId, scrollToBottom, showToast, user]);
+  }, [editingMessage, handleSendNewMessage, showToast]);
 
-  useEffect(() => {
-    void loadConversation();
-  }, [loadConversation]);
+  // ---- Message deletion ----
+  const handleDeleteRequest = useCallback((message: Message) => {
+    setDeleteTarget(message);
+  }, []);
 
-  useEffect(() => {
-    if (!conversationId || loading) return;
-    setCachedMessages({
-      conversationId,
-      messages,
-      oldestCursor,
-      hasMore: hasMoreMessages,
-    });
-  }, [conversationId, hasMoreMessages, loading, messages, oldestCursor]);
+  const handleConfirmDelete = useCallback(async () => {
+    if (!deleteTarget) return;
 
-  const markMessagesAsRead = useCallback(async (rows: Message[]) => {
-    if (!user || !conversationId) return;
-
-    const unreadFromOther = rows.filter((message) => message.sender_id !== user.id && message.status !== 'read');
-    if (unreadFromOther.length === 0) return;
-
-    const ids = unreadFromOther.map((message) => message.id);
-    await supabase
+    const { error } = await supabase
       .from('messages')
-      .update({ status: 'read', read_at: new Date().toISOString() })
-      .in('id', ids);
-
-    const lastMessage = unreadFromOther[unreadFromOther.length - 1];
-    await supabase
-      .from('conversation_participants')
-      .update({ last_read_message_id: lastMessage.id, last_read_at: new Date().toISOString() })
-      .eq('conversation_id', conversationId)
-      .eq('user_id', user.id);
-  }, [conversationId, user]);
-
-  useEffect(() => {
-    if (!loading && messages.length > 0) {
-      void markMessagesAsRead(messages);
-    }
-  }, [loading, markMessagesAsRead, messages]);
-
-  useEffect(() => {
-    if (!conversationId || !user) {
-      return;
-    }
-
-    const channel = supabase
-      .channel(`chat-${conversationId}`)
-      .on(
-        'postgres_changes',
-        {
-          event: 'INSERT',
-          schema: 'public',
-          table: 'messages',
-          filter: `conversation_id=eq.${conversationId}`,
-        },
-        async (payload) => {
-          const newMessage = payload.new as Message;
-          
-          // Invalidate cache to ensure fresh data on next load
-          invalidateMessageCache(conversationId);
-          
-          setMessages((current) => {
-            if (current.some((message) => message.id === newMessage.id)) {
-              return current;
-            }
-            return [...current, newMessage];
-          });
-          scrollToBottom();
-
-          if (newMessage.sender_id !== user.id && newMessage.status === 'sent') {
-            await supabase
-              .from('messages')
-              .update({ status: 'read', read_at: new Date().toISOString() })
-              .eq('id', newMessage.id);
-            await supabase
-              .from('conversation_participants')
-              .update({ last_read_message_id: newMessage.id, last_read_at: new Date().toISOString() })
-              .eq('conversation_id', conversationId)
-              .eq('user_id', user.id);
-          }
-        }
-      )
-      .on(
-        'postgres_changes',
-        {
-          event: 'UPDATE',
-          schema: 'public',
-          table: 'messages',
-          filter: `conversation_id=eq.${conversationId}`,
-        },
-        (payload) => {
-          const updated = payload.new as Message;
-          setMessages((current) => current.map((message) => (message.id === updated.id ? updated : message)));
-        }
-      )
-      .on(
-        'postgres_changes',
-        {
-          event: '*',
-          schema: 'public',
-          table: 'conversation_preferences',
-          filter: `conversation_id=eq.${conversationId}`,
-        },
-        (payload) => {
-          const nextRow = (payload.new || payload.old) as ConversationPreference | undefined;
-          if (!nextRow || nextRow.user_id !== user.id) {
-            return;
-          }
-
-          if (payload.eventType === 'DELETE') {
-            setPreference(null);
-            return;
-          }
-
-          setPreference(payload.new as ConversationPreference);
-        }
-      )
-      .subscribe();
-
-    return () => {
-      void supabase.removeChannel(channel);
-    };
-  }, [conversationId, scrollToBottom, user]);
-
-  useEffect(() => {
-    return () => {
-      if (mediaPreview) {
-        revokePreviewUrl(mediaPreview.src);
-      }
-    };
-  }, [mediaPreview, revokePreviewUrl]);
-
-  const loadOlderMessages = async () => {
-    if (!conversationId || loadingOlder || !hasMoreMessages || !oldestCursor) {
-      return;
-    }
-
-    setLoadingOlder(true);
-    try {
-      const page = await getMessagesPage(conversationId, {
-        beforeCreatedAt: oldestCursor,
-        limit: MESSAGE_PAGE_SIZE,
-      });
-
-      setMessages((current) => {
-        const existingIds = new Set(current.map((message) => message.id));
-        const olderMessages = page.messages.filter((message) => !existingIds.has(message.id));
-        return [...olderMessages, ...current];
-      });
-      setOldestCursor(page.oldestCursor);
-      setHasMoreMessages(page.hasMore);
-    } catch {
-      showToast('Could not load older messages.');
-    } finally {
-      setLoadingOlder(false);
-    }
-  };
-
-  const uploadMedia = useCallback(async (draft: MediaDraft): Promise<{ url: string; path: string } | null> => {
-    if (!user || !conversationId) {
-      return null;
-    }
-
-    const fileName = sanitizeFileName(draft.fileName || fallbackFileName(draft.type, draft.mimeType));
-    const filePath = `${user.id}/${conversationId}/${Date.now()}-${fileName}`;
-
-    const { error } = await supabase.storage
-      .from('chat-media')
-      .upload(filePath, draft.blob, {
-        contentType: draft.mimeType || undefined,
-      });
+      .delete()
+      .eq('id', deleteTarget.id);
 
     if (error) {
-      return null;
+      showToast('Failed to delete message.');
+    } else {
+      setMessages((current) => current.filter((m) => m.id !== deleteTarget.id));
+      showToast('Message deleted.', 'success');
     }
-
-    const { data } = supabase.storage.from('chat-media').getPublicUrl(filePath);
-    return { url: data.publicUrl, path: filePath };
-  }, [conversationId, user]);
-
-  const handleSend = async (text: string) => {
-    if (!user || !conversationId || sending) {
-      return;
-    }
-
-    setSending(true);
-    const { data, error } = await supabase
-      .from('messages')
-      .insert({
-        conversation_id: conversationId,
-        sender_id: user.id,
-        content: text,
-      })
-      .select('id')
-      .single();
-    setSending(false);
-
-    if (error) {
-      showToast('Message failed to send.');
-      return;
-    }
-
-    if (data?.id) {
-      void notifyPush(data.id);
-    }
-  };
-
-  const handleSendMedia = async (caption: string) => {
-    if (!user || !conversationId || !mediaPreview || sending) {
-      return;
-    }
-
-    setSending(true);
-    const uploaded = await uploadMedia(mediaPreview);
-    if (!uploaded) {
-      setSending(false);
-      showToast('Unable to upload attachment.');
-      return;
-    }
-
-    const { data, error } = await supabase
-      .from('messages')
-      .insert({
-        conversation_id: conversationId,
-        sender_id: user.id,
-        content: caption,
-        message_type: mediaPreview.type as MessageType,
-        media_url: uploaded.url,
-        media_path: uploaded.path,
-        media_name: mediaPreview.fileName,
-        media_mime_type: mediaPreview.mimeType,
-        media_size_bytes: mediaPreview.sizeBytes,
-      })
-      .select('id')
-      .single();
-
-    revokePreviewUrl(mediaPreview.src);
-    setMediaPreview(null);
-    setSending(false);
-
-    if (error) {
-      showToast('Unable to send attachment.');
-      return;
-    }
-
-    if (data?.id) {
-      void notifyPush(data.id);
-    }
-  };
-
-  const takePhoto = async () => {
-    try {
-      const photo = await Camera.getPhoto({
-        quality: 85,
-        source: CameraSource.Camera,
-        resultType: CameraResultType.Uri,
-      });
-
-      if (!photo.webPath) {
-        return;
-      }
-
-      const blob = await fetchBlobFromWebPath(photo.webPath);
-      if (!blob) {
-        showToast('Could not process captured photo.');
-        return;
-      }
-
-      applyMediaPreview({
-        src: photo.webPath,
-        blob,
-        type: 'image',
-        fileName: `photo.${photo.format || 'jpg'}`,
-        mimeType: blob.type || 'image/jpeg',
-        sizeBytes: blob.size,
-      });
-    } catch {
-      // user cancellation is expected and should stay silent
-    }
-  };
-
-  const pickImageFromGallery = async () => {
-    if (!Capacitor.isNativePlatform()) {
-      imageFileInputRef.current?.click();
-      return;
-    }
-
-    try {
-      const result = await Camera.pickImages({ quality: 85, limit: 1 });
-      const selected = result.photos?.[0];
-      if (!selected?.webPath) {
-        return;
-      }
-
-      const blob = await fetchBlobFromWebPath(selected.webPath);
-      if (!blob) {
-        showToast('Could not process selected image.');
-        return;
-      }
-
-      applyMediaPreview({
-        src: selected.webPath,
-        blob,
-        type: 'image',
-        fileName: `photo.${selected.format || 'jpg'}`,
-        mimeType: blob.type || 'image/jpeg',
-        sizeBytes: blob.size,
-      });
-    } catch {
-      // user cancellation is expected and should stay silent
-    }
-  };
-
-  const handleImageFileSelected = (event: ChangeEvent<HTMLInputElement>) => {
-    const file = event.target.files?.[0];
-    if (!file) {
-      return;
-    }
-
-    event.target.value = '';
-    applyMediaPreview({
-      src: URL.createObjectURL(file),
-      blob: file,
-      type: 'image',
-      fileName: file.name,
-      mimeType: file.type || 'image/jpeg',
-      sizeBytes: file.size,
-    });
-  };
-
-  const handleVideoFileSelected = (event: ChangeEvent<HTMLInputElement>) => {
-    const file = event.target.files?.[0];
-    if (!file) {
-      return;
-    }
-
-    event.target.value = '';
-    applyMediaPreview({
-      src: URL.createObjectURL(file),
-      blob: file,
-      type: 'video',
-      fileName: file.name,
-      mimeType: file.type || 'video/mp4',
-      sizeBytes: file.size,
-    });
-  };
-
-  const handleFileSelected = (event: ChangeEvent<HTMLInputElement>) => {
-    const file = event.target.files?.[0];
-    if (!file) {
-      return;
-    }
-
-    event.target.value = '';
-    applyMediaPreview({
-      src: URL.createObjectURL(file),
-      blob: file,
-      type: 'file',
-      fileName: file.name,
-      mimeType: file.type || 'application/octet-stream',
-      sizeBytes: file.size,
-    });
-  };
+    setDeleteTarget(null);
+  }, [deleteTarget, setMessages, showToast]);
 
   const isOnline = otherUser ? onlineUsers.has(otherUser.id) : false;
   const activeTheme = useMemo(() => getConversationTheme(preference?.theme_id), [preference?.theme_id]);
@@ -612,6 +218,12 @@ const Chat: React.FC = () => {
 
   const displayName = getConversationDisplayName(otherUser, preference);
 
+  // Compute subtitle text: typing indicator > online status
+  const subtitleText = peerIsTyping ? 'typing...' : lastSeenText;
+  const subtitleClass = peerIsTyping
+    ? 'chat-header-status status-typing'
+    : `chat-header-status ${isOnline ? 'status-online' : ''}`;
+
   return (
     <IonPage style={themeVars}>
       <IonHeader>
@@ -631,10 +243,19 @@ const Chat: React.FC = () => {
             )}
             <div className="chat-header-text">
               <IonTitle className="chat-header-title">{displayName}</IonTitle>
-              <span className={`chat-header-status ${isOnline ? 'status-online' : ''}`}>{lastSeenText}</span>
+              <span className={subtitleClass}>{subtitleText}</span>
             </div>
           </div>
           <IonButtons slot="end">
+            <IonButton
+              fill="clear"
+              onClick={() => otherUser && videoCall.initiateCall(otherUser.id)}
+              disabled={videoCall.callStatus !== 'idle' || !otherUser}
+              aria-label="Video call"
+              className="chat-call-btn"
+            >
+              <IonIcon icon={videocamOutline} />
+            </IonButton>
             <IonButton fill="clear" onClick={() => setShowChatMenu(true)} aria-label="Conversation options">
               <IonIcon icon={ellipsisVertical} />
             </IonButton>
@@ -673,8 +294,23 @@ const Chat: React.FC = () => {
                       message={message}
                       isMine={message.sender_id === user?.id}
                       onMediaOpen={(src, type) => setMediaViewer({ src, type })}
+                      onEdit={handleEditRequest}
+                      onDelete={handleDeleteRequest}
                     />
                   ))}
+
+                  {/* Typing indicator dots */}
+                  {peerIsTyping && (
+                    <div className="bubble-row bubble-left">
+                      <div className="bubble bubble-theirs bubble-typing">
+                        <div className="typing-dots">
+                          <span className="typing-dot" />
+                          <span className="typing-dot" />
+                          <span className="typing-dot" />
+                        </div>
+                      </div>
+                    </div>
+                  )}
                 </div>
               )}
             </div>
@@ -686,7 +322,10 @@ const Chat: React.FC = () => {
         onSend={handleSend}
         onPickGallery={() => setShowGallerySheet(true)}
         onOpenCamera={() => setShowCaptureSheet(true)}
+        onTyping={sendTyping}
         disabled={sending}
+        editingMessage={editingMessage}
+        onCancelEdit={handleCancelEdit}
       />
 
       <input
@@ -810,13 +449,7 @@ const Chat: React.FC = () => {
         fileSizeBytes={mediaPreview?.sizeBytes ?? null}
         sending={sending}
         onSend={handleSendMedia}
-        onCancel={() => {
-          if (!mediaPreview) {
-            return;
-          }
-          revokePreviewUrl(mediaPreview.src);
-          setMediaPreview(null);
-        }}
+        onCancel={cancelMedia}
       />
 
       <MediaViewerModal
@@ -824,6 +457,41 @@ const Chat: React.FC = () => {
         src={mediaViewer?.src ?? ''}
         type={mediaViewer?.type ?? 'image'}
         onClose={() => setMediaViewer(null)}
+      />
+
+      <VideoCallModal
+        isOpen={videoCall.callStatus === 'calling' || videoCall.callStatus === 'active' || videoCall.callStatus === 'ended'}
+        callStatus={videoCall.callStatus}
+        localStream={videoCall.localStream}
+        remoteStream={videoCall.remoteStream}
+        isMuted={videoCall.isMuted}
+        isVideoOff={videoCall.isVideoOff}
+        callDuration={videoCall.callDuration}
+        remoteName={displayName}
+        remoteAvatarUrl={otherUser?.avatar_url ?? null}
+        onHangUp={videoCall.hangUp}
+        onToggleMute={videoCall.toggleMuteAudio}
+        onToggleVideo={videoCall.toggleCameraOff}
+      />
+
+      <IncomingCallOverlay
+        isOpen={videoCall.callStatus === 'ringing'}
+        callerName={displayName}
+        callerAvatarUrl={otherUser?.avatar_url ?? null}
+        onAccept={videoCall.acceptIncomingCall}
+        onReject={videoCall.rejectIncomingCall}
+      />
+
+      {/* Delete confirmation alert */}
+      <IonAlert
+        isOpen={!!deleteTarget}
+        onDidDismiss={() => setDeleteTarget(null)}
+        header="Delete Message"
+        message="Are you sure you want to delete this message? This cannot be undone."
+        buttons={[
+          { text: 'Cancel', role: 'cancel' },
+          { text: 'Delete', role: 'destructive', handler: () => void handleConfirmDelete() },
+        ]}
       />
     </IonPage>
   );
