@@ -9,6 +9,8 @@
  *   This prevents the #1 cause of "call connects but no media" bugs.
  * - Supabase broadcast channels are used for signaling (no DB table needed).
  * - A deterministic tiebreaker handles simultaneous call initiation.
+ * - TURN relay servers are included for symmetric NAT traversal (mobile carriers).
+ * - ICE `disconnected` state has a grace period before hangup (mobile networks).
  */
 
 import { supabase } from '../supabaseClient';
@@ -32,15 +34,44 @@ export interface SignalPayload {
 export type SignalCallback = (payload: SignalPayload) => void;
 
 // ---------------------------------------------------------------------------
-// STUN configuration (free Google servers, sufficient for most NAT types)
+// STUN + TURN configuration
+// TURN servers are essential for mobile-to-mobile calls where both peers
+// are behind symmetric NAT (common on mobile carriers).
 // ---------------------------------------------------------------------------
 
 const RTC_CONFIG: RTCConfiguration = {
   iceServers: [
     { urls: 'stun:stun.l.google.com:19302' },
     { urls: 'stun:stun1.l.google.com:19302' },
+    // Free TURN relay servers for NAT traversal on mobile networks
+    {
+      urls: 'turn:a.relay.metered.ca:80',
+      username: 'e8dd65b92f6deb11e6080e8c',
+      credential: '3RFEjIhfac6FJKXR',
+    },
+    {
+      urls: 'turn:a.relay.metered.ca:80?transport=tcp',
+      username: 'e8dd65b92f6deb11e6080e8c',
+      credential: '3RFEjIhfac6FJKXR',
+    },
+    {
+      urls: 'turn:a.relay.metered.ca:443',
+      username: 'e8dd65b92f6deb11e6080e8c',
+      credential: '3RFEjIhfac6FJKXR',
+    },
+    {
+      urls: 'turns:a.relay.metered.ca:443',
+      username: 'e8dd65b92f6deb11e6080e8c',
+      credential: '3RFEjIhfac6FJKXR',
+    },
   ],
+  // Prefer relay candidates to ensure connectivity on restrictive networks
+  iceTransportPolicy: 'all',
 };
+
+// Grace period before treating ICE `disconnected` as fatal (ms).
+// Mobile networks frequently bounce between connected/disconnected.
+const ICE_DISCONNECTED_TIMEOUT_MS = 5000;
 
 // ---------------------------------------------------------------------------
 // Module state (singleton — only one call at a time)
@@ -55,6 +86,7 @@ let pendingIceCandidates: RTCIceCandidateInit[] = [];
 let signalListeners: SignalCallback[] = [];
 let currentConversationId: string | null = null;
 let currentLocalUserId: string | null = null;
+let disconnectedTimer: ReturnType<typeof setTimeout> | null = null;
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -67,6 +99,13 @@ function getChannelName(conversationId: string): string {
 /** Deterministic tiebreaker: lower user ID wins and becomes the offerer. */
 export function isOfferer(localUserId: string, remoteUserId: string): boolean {
   return localUserId < remoteUserId;
+}
+
+function clearDisconnectedTimer(): void {
+  if (disconnectedTimer) {
+    clearTimeout(disconnectedTimer);
+    disconnectedTimer = null;
+  }
 }
 
 // ---------------------------------------------------------------------------
@@ -171,8 +210,8 @@ function createPeerConnection(conversationId: string, localUserId: string): RTCP
     peerConnection.close();
   }
 
+  clearDisconnectedTimer();
   isRemoteDescriptionSet = false;
-  pendingIceCandidates = [];
   remoteStream = new MediaStream();
 
   const pc = new RTCPeerConnection(RTC_CONFIG);
@@ -186,33 +225,21 @@ function createPeerConnection(conversationId: string, localUserId: string): RTCP
 
   // When remote tracks arrive, update the stream and notify listeners
   pc.ontrack = (event) => {
-    if (event.streams && event.streams[0]) {
-      remoteStream = event.streams[0];
-
-      for (const listener of signalListeners) {
-        listener({
-          type: 'remote-stream',
-          from: 'system',
-          to: localUserId,
-          conversationId,
-          stream: remoteStream,
-        });
+    if (remoteStream && event.track) {
+      if (!remoteStream.getTracks().some((t) => t.id === event.track.id)) {
+        remoteStream.addTrack(event.track);
+        console.log('[Call] Added remote track:', event.track.kind);
       }
-    } else {
-      remoteStream!.addTrack(event.track);
-      // For single tracks, create a new stream reference to force React re-render
-      const updatedStream = new MediaStream(remoteStream!.getTracks());
-      remoteStream = updatedStream;
+    }
 
-      for (const listener of signalListeners) {
-        listener({
-          type: 'remote-stream',
-          from: 'system',
-          to: localUserId,
-          conversationId,
-          stream: remoteStream,
-        });
-      }
+    for (const listener of signalListeners) {
+      listener({
+        type: 'remote-stream',
+        from: 'system',
+        to: localUserId,
+        conversationId,
+        stream: remoteStream || undefined,
+      });
     }
   };
 
@@ -230,17 +257,42 @@ function createPeerConnection(conversationId: string, localUserId: string): RTCP
   };
 
   pc.oniceconnectionstatechange = () => {
-    console.log('[Call] ICE state:', pc.iceConnectionState);
-    if (pc.iceConnectionState === 'failed' || pc.iceConnectionState === 'disconnected') {
-      // Notify listeners about connection failure
-      for (const listener of signalListeners) {
-        listener({
-          type: 'hangup',
-          from: 'system',
-          to: localUserId,
-          conversationId,
-        });
-      }
+    const state = pc.iceConnectionState;
+    console.log('[Call] ICE state:', state);
+
+    switch (state) {
+      case 'connected':
+      case 'completed':
+        // Connection recovered or established — clear any pending disconnect timer
+        clearDisconnectedTimer();
+        break;
+
+      case 'disconnected':
+        // Mobile networks frequently bounce to disconnected temporarily.
+        // Give it a grace period before treating as fatal.
+        clearDisconnectedTimer();
+        disconnectedTimer = setTimeout(() => {
+          // Check again — it may have recovered during the grace period
+          if (peerConnection && peerConnection.iceConnectionState === 'disconnected') {
+            console.warn('[Call] ICE still disconnected after grace period, ending call');
+            endCall('hangup');
+          }
+        }, ICE_DISCONNECTED_TIMEOUT_MS);
+        break;
+
+      case 'failed':
+        // ICE negotiation permanently failed — end the call and notify the remote peer
+        clearDisconnectedTimer();
+        console.error('[Call] ICE connection failed, ending call');
+        endCall('hangup');
+        break;
+
+      case 'closed':
+        clearDisconnectedTimer();
+        break;
+
+      default:
+        break;
     }
   };
 
@@ -320,10 +372,14 @@ export async function startCall(
 ): Promise<{ localStream: MediaStream; remoteStream: MediaStream }> {
   ensureSignalingChannel(conversationId, localUserId);
 
+  pendingIceCandidates = []; // Clear stale candidates before starting a new call session
   const stream = await acquireLocalMedia();
   const pc = createPeerConnection(conversationId, localUserId);
 
-  const offer = await pc.createOffer();
+  const offer = await pc.createOffer({
+    offerToReceiveAudio: true,
+    offerToReceiveVideo: true,
+  });
   await pc.setLocalDescription(offer);
 
   sendSignal({
@@ -388,6 +444,7 @@ export async function acceptCall(
 
 /**
  * End the current call and clean up call resources (but keep channel alive).
+ * Sends a signal to the remote peer so they know the call ended.
  */
 export function endCall(reason: 'hangup' | 'reject' | 'busy' = 'hangup'): void {
   if (currentConversationId && currentLocalUserId) {
@@ -450,6 +507,8 @@ export function toggleVideo(videoOff: boolean): void {
  * Use this when ending a call normally.
  */
 export function cleanupCall(): void {
+  clearDisconnectedTimer();
+
   // Stop all media tracks
   stopLocalMedia();
 
@@ -496,8 +555,11 @@ export function getCallDebugInfo(): Record<string, unknown> {
   return {
     hasPC: !!peerConnection,
     pcState: peerConnection?.iceConnectionState ?? 'none',
+    signalingState: peerConnection?.signalingState ?? 'none',
     hasLocalStream: !!localStream,
+    localTracks: localStream?.getTracks().map((t) => `${t.kind}:${t.enabled}`) ?? [],
     hasRemoteStream: !!remoteStream,
+    remoteTracks: remoteStream?.getTracks().map((t) => `${t.kind}:${t.enabled}`) ?? [],
     remoteDescSet: isRemoteDescriptionSet,
     pendingCandidates: pendingIceCandidates.length,
     conversationId: currentConversationId,

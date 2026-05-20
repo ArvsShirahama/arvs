@@ -6,7 +6,7 @@
  * and call controls (mute, camera toggle, hang up).
  */
 
-import { useEffect, useRef } from 'react';
+import { useEffect, useRef, useCallback } from 'react';
 import { IonIcon, IonModal } from '@ionic/react';
 import {
   call as callIcon,
@@ -39,6 +39,38 @@ function formatDuration(seconds: number): string {
   return `${mins.toString().padStart(2, '0')}:${secs.toString().padStart(2, '0')}`;
 }
 
+/**
+ * Binds a MediaStream to a <video> element with retry logic.
+ * IonModal may delay DOM mounting due to its entrance animation,
+ * so we retry after a short delay if the ref isn't available yet.
+ */
+function bindStreamToVideo(
+  videoRef: React.RefObject<HTMLVideoElement | null>,
+  stream: MediaStream | null,
+  retryCount = 0
+): void {
+  if (!stream) return;
+
+  const el = videoRef.current;
+  if (el) {
+    // Only assign srcObject if it's not already set to this stream.
+    // Re-assigning srcObject tears down the media pipeline and causes black screens on mobile WebViews.
+    if (el.srcObject !== stream) {
+      el.srcObject = stream;
+    }
+    
+    // Always attempt play() to resume/start playback of newly added tracks
+    el.play().catch((err) => {
+      console.warn('[Call] Error playing video:', err);
+    });
+  } else if (retryCount < 5) {
+    // Retry — modal may still be animating into the DOM
+    setTimeout(() => {
+      bindStreamToVideo(videoRef, stream, retryCount + 1);
+    }, 100);
+  }
+}
+
 export default function VideoCallModal({
   isOpen,
   callStatus,
@@ -56,19 +88,55 @@ export default function VideoCallModal({
   const localVideoRef = useRef<HTMLVideoElement>(null);
   const remoteVideoRef = useRef<HTMLVideoElement>(null);
 
-  // Attach local stream to video element
+  // Bind local stream to video element
   useEffect(() => {
-    if (localVideoRef.current && localStream) {
-      localVideoRef.current.srcObject = localStream;
+    if (isOpen && localStream) {
+      bindStreamToVideo(localVideoRef, localStream);
     }
-  }, [localStream]);
+  }, [localStream, isOpen]);
 
-  // Attach remote stream to video element
+  // Bind remote stream to video element
   useEffect(() => {
-    if (remoteVideoRef.current && remoteStream) {
-      remoteVideoRef.current.srcObject = remoteStream;
+    if (!isOpen || !remoteStream) return;
+
+    // Bind initially
+    bindStreamToVideo(remoteVideoRef, remoteStream);
+
+    // Re-bind (attempt play) when new tracks are added natively or unmute
+    const handleTrackUpdate = () => {
+      console.log('[CallModal] Remote stream track update, playing...');
+      bindStreamToVideo(remoteVideoRef, remoteStream);
+    };
+
+    remoteStream.addEventListener('addtrack', handleTrackUpdate);
+    remoteStream.addEventListener('removetrack', handleTrackUpdate);
+
+    // Also listen to existing tracks in case they unmute/activate
+    const tracks = remoteStream.getTracks();
+    tracks.forEach((track) => {
+      track.addEventListener('unmute', handleTrackUpdate);
+      track.addEventListener('ended', handleTrackUpdate);
+    });
+
+    return () => {
+      remoteStream.removeEventListener('addtrack', handleTrackUpdate);
+      remoteStream.removeEventListener('removetrack', handleTrackUpdate);
+      tracks.forEach((track) => {
+        track.removeEventListener('unmute', handleTrackUpdate);
+        track.removeEventListener('ended', handleTrackUpdate);
+      });
+    };
+  }, [remoteStream, isOpen]);
+
+  // Re-bind streams when modal finishes its entrance animation
+  const handleDidPresent = useCallback(() => {
+    if (localStream) {
+      bindStreamToVideo(localVideoRef, localStream);
     }
-  }, [remoteStream]);
+    if (remoteStream) {
+      bindStreamToVideo(remoteVideoRef, remoteStream);
+    }
+  }, [localStream, remoteStream]);
 
   const statusLabel =
     callStatus === 'calling'
@@ -82,7 +150,12 @@ export default function VideoCallModal({
             : '';
 
   return (
-    <IonModal isOpen={isOpen} className="video-call-modal" backdropDismiss={false}>
+    <IonModal
+      isOpen={isOpen}
+      className="video-call-modal"
+      backdropDismiss={false}
+      onDidPresent={handleDidPresent}
+    >
       <div className="video-call-container">
         {/* Remote video (full screen background) */}
         <video
@@ -90,6 +163,7 @@ export default function VideoCallModal({
           className="video-call-remote"
           autoPlay
           playsInline
+          {...{ 'webkit-playsinline': 'true' } as React.HTMLAttributes<HTMLVideoElement>}
         />
 
         {/* Overlay when remote video not yet connected */}
@@ -127,6 +201,7 @@ export default function VideoCallModal({
             autoPlay
             playsInline
             muted
+            {...{ 'webkit-playsinline': 'true' } as React.HTMLAttributes<HTMLVideoElement>}
           />
           {isVideoOff && (
             <div className="video-call-local-off">

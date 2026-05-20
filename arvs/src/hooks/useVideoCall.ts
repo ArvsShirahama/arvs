@@ -81,6 +81,20 @@ export function useVideoCall(conversationId: string, localUserId: string | undef
     };
   }, [callStatus]);
 
+  // Helper to fully reset call state to ended → idle
+  const resetToEnded = useCallback(() => {
+    setCallStatus('ended');
+    setIncomingCall(null);
+    setLocalStream(null);
+    setRemoteStream(null);
+    setIsMuted(false);
+    setIsVideoOff(false);
+
+    setTimeout(() => {
+      setCallStatus('idle');
+    }, 1500);
+  }, []);
+
   // Subscribe to signaling channel and listen for signals
   useEffect(() => {
     if (!conversationId || !localUserId) return;
@@ -114,45 +128,26 @@ export function useVideoCall(conversationId: string, localUserId: string | undef
         }
 
         case 'hangup': {
-          // Remote peer hung up or connection failed
-          setCallStatus('ended');
-          setIncomingCall(null);
-          setLocalStream(null);
-          setRemoteStream(null);
-          setIsMuted(false);
-          setIsVideoOff(false);
-          cleanupCall();
-
-          // Auto-reset to idle after a brief pause
-          setTimeout(() => {
-            setCallStatus('idle');
-          }, 1500);
+          // Remote peer hung up or ICE connection failed
+          // Only clean up if we're in an active/calling/ringing state
+          if (callStatusRef.current !== 'idle' && callStatusRef.current !== 'ended') {
+            cleanupCall();
+            resetToEnded();
+          }
           break;
         }
 
         case 'reject': {
           // Our call was rejected
-          setCallStatus('ended');
-          setLocalStream(null);
-          setRemoteStream(null);
           cleanupCall();
-
-          setTimeout(() => {
-            setCallStatus('idle');
-          }, 1500);
+          resetToEnded();
           break;
         }
 
         case 'busy': {
           // Remote peer is already in a call
-          setCallStatus('ended');
-          setLocalStream(null);
-          setRemoteStream(null);
           cleanupCall();
-
-          setTimeout(() => {
-            setCallStatus('idle');
-          }, 1500);
+          resetToEnded();
           break;
         }
 
@@ -171,7 +166,7 @@ export function useVideoCall(conversationId: string, localUserId: string | undef
     return () => {
       unsubscribe();
     };
-  }, [conversationId, localUserId]);
+  }, [conversationId, localUserId, resetToEnded]);
 
   // Full cleanup on unmount (including signaling channel)
   useEffect(() => {
@@ -232,17 +227,8 @@ export function useVideoCall(conversationId: string, localUserId: string | undef
 
   const hangUp = useCallback(() => {
     endCall('hangup');
-    setCallStatus('ended');
-    setLocalStream(null);
-    setRemoteStream(null);
-    setIncomingCall(null);
-    setIsMuted(false);
-    setIsVideoOff(false);
-
-    setTimeout(() => {
-      setCallStatus('idle');
-    }, 1500);
-  }, []);
+    resetToEnded();
+  }, [resetToEnded]);
 
   const toggleMuteAudio = useCallback(() => {
     setIsMuted((prev) => {
