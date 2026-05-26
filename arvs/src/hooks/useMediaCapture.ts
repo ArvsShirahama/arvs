@@ -207,6 +207,7 @@ export function useMediaCapture(
         quality: 85,
         source: CameraSource.Camera,
         resultType: CameraResultType.Uri,
+        saveToGallery: false,
       });
 
       if (!photo.webPath) {

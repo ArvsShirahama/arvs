@@ -188,7 +188,7 @@ const Chat: React.FC = () => {
     const bgImage = preference?.background_image_url
       ? `${activeTheme.overlay}, url(${preference.background_image_url})`
       : activeTheme.gradient;
-      
+
     return {
       backgroundImage: bgImage,
       backgroundSize: 'cover',
@@ -266,7 +266,7 @@ const Chat: React.FC = () => {
       <IonContent ref={contentRef} className="chat-page" fullscreen>
         {/* Fixed background layer */}
         <div className="chat-background-fixed" style={chatBackgroundStyle} />
-        
+
         <ErrorBoundary>
           {loading ? (
             <div className="chat-loading">
