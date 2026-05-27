@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
   IonActionSheet,
+  IonAlert,
   IonContent,
   IonFab,
   IonFabButton,
@@ -18,11 +19,11 @@ import {
   useIonRouter,
   useIonToast,
 } from '@ionic/react';
-import { add, imageOutline, videocamOutline } from 'ionicons/icons';
+import { add, eyeOutline, imageOutline, trashOutline, videocamOutline } from 'ionicons/icons';
 import ChatListItem from '../components/ChatListItem';
 import NewChatModal from '../components/NewChatModal';
 import Avatar from '../components/Avatar';
-import MediaViewerModal from '../components/MediaViewerModal';
+import StoryViewerModal, { type StoryViewerItem } from '../components/StoryViewerModal';
 import { useAuth } from '../hooks/useAuth';
 import {
   getConversationSummary,
@@ -40,6 +41,13 @@ type ActiveStory = Omit<Story, 'caption' | 'media_type'> & {
   media_type: StoryMediaType;
 };
 
+interface StoryViewerContext {
+  userId: string;
+  displayName: string;
+  avatarUrl: string | null;
+  isOwn: boolean;
+}
+
 const ChatList: React.FC = () => {
   const { user, profile, onlineUsers } = useAuth();
   const router = useIonRouter();
@@ -52,9 +60,11 @@ const ChatList: React.FC = () => {
   const [nextCursor, setNextCursor] = useState<string | null>(null);
   const [showNewChat, setShowNewChat] = useState(false);
   const [showStorySheet, setShowStorySheet] = useState(false);
+  const [showMyStorySheet, setShowMyStorySheet] = useState(false);
+  const [confirmDeleteAllStories, setConfirmDeleteAllStories] = useState(false);
   const [uploadingStory, setUploadingStory] = useState(false);
-  const [storiesByUserId, setStoriesByUserId] = useState<Record<string, ActiveStory>>({});
-  const [selectedStory, setSelectedStory] = useState<ActiveStory | null>(null);
+  const [storiesByUserId, setStoriesByUserId] = useState<Record<string, ActiveStory[]>>({});
+  const [storyViewerContext, setStoryViewerContext] = useState<StoryViewerContext | null>(null);
 
   // File input refs for story upload
   const storyImageInputRef = useRef<HTMLInputElement>(null);
@@ -80,6 +90,172 @@ const ChatList: React.FC = () => {
     if (!user) return [];
     return conversations.filter((conv) => conv.other_user && onlineUsers.has(conv.other_user.id));
   }, [conversations, onlineUsers, user]);
+
+  const ownActiveStories = useMemo(() => {
+    if (!user) return [];
+    return storiesByUserId[user.id] || [];
+  }, [storiesByUserId, user]);
+
+  const viewerStories = useMemo<StoryViewerItem[]>(() => {
+    if (!storyViewerContext) return [];
+    return (storiesByUserId[storyViewerContext.userId] || []).map((story) => ({
+      id: story.id,
+      media_url: story.media_url,
+      media_type: story.media_type,
+      created_at: story.created_at,
+      caption: story.caption,
+    }));
+  }, [storiesByUserId, storyViewerContext]);
+
+  const fetchActiveStories = useCallback(async (targetUserIds: string[]) => {
+    const uniqueUserIds = Array.from(new Set(targetUserIds.filter(Boolean)));
+    if (uniqueUserIds.length === 0) {
+      setStoriesByUserId({});
+      return;
+    }
+
+    const { data, error } = await supabase
+      .from('stories')
+      .select('id,user_id,media_url,media_path,media_type,caption,created_at,expires_at')
+      .in('user_id', uniqueUserIds)
+      .gt('expires_at', new Date().toISOString())
+      .order('created_at', { ascending: true });
+
+    if (error) {
+      console.error('[ChatList] Failed to fetch stories for avatars:', error);
+      return;
+    }
+
+    const nextStories: Record<string, ActiveStory[]> = {};
+    for (const story of (data || []) as ActiveStory[]) {
+      if (!nextStories[story.user_id]) nextStories[story.user_id] = [];
+      nextStories[story.user_id].push(story);
+    }
+
+    setStoriesByUserId(nextStories);
+  }, []);
+
+  const openStoryViewer = useCallback((
+    targetUserId: string,
+    displayName: string,
+    avatarUrl: string | null,
+    isOwn = false
+  ) => {
+    const userStories = storiesByUserId[targetUserId] || [];
+    if (userStories.length === 0) return;
+
+    setStoryViewerContext({
+      userId: targetUserId,
+      displayName,
+      avatarUrl,
+      isOwn,
+    });
+  }, [storiesByUserId]);
+
+  const refreshStoriesForListUsers = useCallback(async () => {
+    if (!user) return;
+    const targetUserIds = Array.from(
+      new Set([
+        ...conversations.map((conv) => conv.other_user.id),
+        user.id,
+      ])
+    );
+    await fetchActiveStories(targetUserIds);
+  }, [conversations, fetchActiveStories, user]);
+
+  const cleanupExpiredOwnStories = useCallback(async () => {
+    if (!user) return;
+
+    const nowIso = new Date().toISOString();
+    const { data: expiredStories, error: fetchError } = await supabase
+      .from('stories')
+      .select('id,media_path')
+      .eq('user_id', user.id)
+      .lte('expires_at', nowIso);
+
+    if (fetchError || !expiredStories || expiredStories.length === 0) {
+      return;
+    }
+
+    const expiredIds = expiredStories.map((story) => story.id);
+    const expiredPaths = expiredStories
+      .map((story) => story.media_path)
+      .filter((path): path is string => Boolean(path));
+
+    await supabase
+      .from('stories')
+      .delete()
+      .in('id', expiredIds)
+      .eq('user_id', user.id);
+
+    if (expiredPaths.length > 0) {
+      await supabase.storage.from('stories').remove(expiredPaths);
+    }
+  }, [user]);
+
+  const handleDeleteStory = useCallback(async (storyId: string) => {
+    if (!user) return;
+    const ownStories = storiesByUserId[user.id] || [];
+    const story = ownStories.find((item) => item.id === storyId);
+    if (!story) return;
+
+    const { error: deleteError } = await supabase
+      .from('stories')
+      .delete()
+      .eq('id', story.id)
+      .eq('user_id', user.id);
+
+    if (deleteError) {
+      presentToast({ message: 'Failed to delete story.', color: 'danger', duration: 2200, position: 'top' });
+      return;
+    }
+
+    if (story.media_path) {
+      await supabase.storage.from('stories').remove([story.media_path]);
+    }
+
+    setStoriesByUserId((prev) => {
+      const current = prev[user.id] || [];
+      const remaining = current.filter((item) => item.id !== story.id);
+      return {
+        ...prev,
+        [user.id]: remaining,
+      };
+    });
+
+    presentToast({ message: 'Story deleted.', color: 'success', duration: 1500, position: 'top' });
+  }, [presentToast, storiesByUserId, user]);
+
+  const handleDeleteAllStories = useCallback(async () => {
+    if (!user || ownActiveStories.length === 0) return;
+
+    const idsToDelete = ownActiveStories.map((story) => story.id);
+    const pathsToDelete = ownActiveStories
+      .map((story) => story.media_path)
+      .filter((path): path is string => Boolean(path));
+
+    const { error } = await supabase
+      .from('stories')
+      .delete()
+      .in('id', idsToDelete)
+      .eq('user_id', user.id);
+
+    if (error) {
+      presentToast({ message: 'Failed to delete stories.', color: 'danger', duration: 2200, position: 'top' });
+      return;
+    }
+
+    if (pathsToDelete.length > 0) {
+      await supabase.storage.from('stories').remove(pathsToDelete);
+    }
+
+    setStoriesByUserId((prev) => ({
+      ...prev,
+      [user.id]: [],
+    }));
+    setStoryViewerContext((prev) => (prev?.isOwn ? null : prev));
+    presentToast({ message: 'All active stories deleted.', color: 'success', duration: 1600, position: 'top' });
+  }, [ownActiveStories, presentToast, user]);
 
   // Story upload handler
   const handleStoryFileSelected = useCallback(async (event: React.ChangeEvent<HTMLInputElement>, mediaType: 'image' | 'video') => {
@@ -115,48 +291,21 @@ const ChatList: React.FC = () => {
         media_url: urlData.publicUrl,
         media_path: filePath,
         media_type: mediaType,
+        expires_at: new Date(Date.now() + (24 * 60 * 60 * 1000)).toISOString(),
       });
 
       if (insertError) {
         presentToast({ message: 'Failed to save story.', color: 'danger', duration: 2200, position: 'top' });
       } else {
         presentToast({ message: 'Story uploaded!', color: 'success', duration: 1500, position: 'top' });
+        await refreshStoriesForListUsers();
       }
     } catch {
       presentToast({ message: 'Something went wrong.', color: 'danger', duration: 2200, position: 'top' });
     } finally {
       setUploadingStory(false);
     }
-  }, [user, presentToast]);
-
-  const fetchActiveStories = useCallback(async (targetUserIds: string[]) => {
-    const uniqueUserIds = Array.from(new Set(targetUserIds.filter(Boolean)));
-    if (uniqueUserIds.length === 0) {
-      setStoriesByUserId({});
-      return;
-    }
-
-    const { data, error } = await supabase
-      .from('stories')
-      .select('id,user_id,media_url,media_path,media_type,caption,created_at,expires_at')
-      .in('user_id', uniqueUserIds)
-      .gt('expires_at', new Date().toISOString())
-      .order('created_at', { ascending: false });
-
-    if (error) {
-      console.error('[ChatList] Failed to fetch stories for avatars:', error);
-      return;
-    }
-
-    const nextStories: Record<string, ActiveStory> = {};
-    for (const story of (data || []) as ActiveStory[]) {
-      if (!nextStories[story.user_id]) {
-        nextStories[story.user_id] = story;
-      }
-    }
-
-    setStoriesByUserId(nextStories);
-  }, []);
+  }, [presentToast, refreshStoriesForListUsers, user]);
 
   const fetchConversations = useCallback(async (reset = false) => {
     if (!user) return;
@@ -194,10 +343,18 @@ const ChatList: React.FC = () => {
 
   useEffect(() => {
     if (!user) return;
+    void cleanupExpiredOwnStories();
+  }, [cleanupExpiredOwnStories, user]);
 
-    const conversationUserIds = conversations
-      .map((conv) => conv.other_user?.id)
-      .filter((id): id is string => Boolean(id));
+  useEffect(() => {
+    if (!user) return;
+
+    const conversationUserIds = [
+      ...conversations
+        .map((conv) => conv.other_user?.id)
+        .filter((id): id is string => Boolean(id)),
+      user.id,
+    ];
 
     void fetchActiveStories(conversationUserIds);
   }, [conversations, fetchActiveStories, user]);
@@ -275,6 +432,41 @@ const ChatList: React.FC = () => {
     };
   }, [user]);
 
+  useEffect(() => {
+    if (!user) return;
+
+    const relevantUserIds = new Set<string>([
+      user.id,
+      ...conversations.map((conv) => conv.other_user.id),
+    ]);
+
+    const channel = supabase
+      .channel(`stories-realtime-${user.id}`)
+      .on(
+        'postgres_changes',
+        { event: '*', schema: 'public', table: 'stories' },
+        async (payload) => {
+          const changedUserId =
+            (payload.new as { user_id?: string } | null)?.user_id
+            ?? (payload.old as { user_id?: string } | null)?.user_id;
+          if (!changedUserId || !relevantUserIds.has(changedUserId)) return;
+          await refreshStoriesForListUsers();
+        }
+      )
+      .subscribe();
+
+    return () => {
+      supabase.removeChannel(channel);
+    };
+  }, [conversations, refreshStoriesForListUsers, user]);
+
+  useEffect(() => {
+    if (!storyViewerContext) return;
+    if (viewerStories.length === 0) {
+      setStoryViewerContext(null);
+    }
+  }, [storyViewerContext, viewerStories.length]);
+
   return (
     <IonPage>
       <IonHeader>
@@ -304,12 +496,19 @@ const ChatList: React.FC = () => {
               {/* My Story — current user's avatar with "+" button */}
               <div
                 className="active-user-item my-story-item"
-                onClick={() => setShowStorySheet(true)}
+                onClick={() => {
+                  if (ownActiveStories.length > 0) {
+                    setShowMyStorySheet(true);
+                    return;
+                  }
+                  setShowStorySheet(true);
+                }}
               >
                 <div className="active-user-avatar-container">
                   <Avatar
                     src={profile?.avatar_url}
                     name={profile?.display_name || 'Me'}
+                    hasStoryRing={ownActiveStories.length > 0}
                   />
                   <span className={`my-story-add-btn ${uploadingStory ? 'my-story-uploading' : ''}`}>
                     {uploadingStory ? (
@@ -319,7 +518,7 @@ const ChatList: React.FC = () => {
                     )}
                   </span>
                 </div>
-                <span className="active-user-name">Create Story</span>
+                <span className="active-user-name">{ownActiveStories.length > 0 ? 'My Story' : 'Create Story'}</span>
               </div>
 
               {/* Divider between My Story and active users */}
@@ -329,7 +528,7 @@ const ChatList: React.FC = () => {
               {activeUsers.map((conv) => {
                 const displayName = conv.other_user?.display_name || 'User';
                 const firstName = displayName.split(' ')[0];
-                const userStory = storiesByUserId[conv.other_user.id];
+                const userStories = storiesByUserId[conv.other_user.id] || [];
                 return (
                   <div
                     key={conv.id}
@@ -338,10 +537,10 @@ const ChatList: React.FC = () => {
                   >
                     <div
                       className="active-user-avatar-container"
-                      onClick={userStory ? (event) => {
+                      onClick={userStories.length > 0 ? (event) => {
                         event.preventDefault();
                         event.stopPropagation();
-                        setSelectedStory(userStory);
+                        openStoryViewer(conv.other_user.id, displayName, conv.other_user?.avatar_url || null);
                       } : undefined}
                     >
                       <Avatar
@@ -349,7 +548,7 @@ const ChatList: React.FC = () => {
                         name={displayName}
                         showStatus={true}
                         isOnline={true}
-                        hasStoryRing={Boolean(userStory)}
+                        hasStoryRing={userStories.length > 0}
                       />
                     </div>
                     <span className="active-user-name">{firstName}</span>
@@ -388,15 +587,20 @@ const ChatList: React.FC = () => {
         ) : (
           <IonList lines="none" className="chatlist-list">
             {filteredConversations.map((conv) => {
-              const story = storiesByUserId[conv.other_user.id];
+              const userStories = storiesByUserId[conv.other_user.id] || [];
+              const displayName = conv.preference?.peer_nickname?.trim()
+                || conv.other_user.display_name
+                || conv.other_user.username;
               return (
               <ChatListItem
                 key={conv.id}
                 conversation={conv}
                 currentUserId={user!.id}
                 isOnline={onlineUsers.has(conv.other_user.id)}
-                hasStory={Boolean(story)}
-                onAvatarClick={story ? () => setSelectedStory(story) : undefined}
+                hasStory={userStories.length > 0}
+                onAvatarClick={userStories.length > 0
+                  ? () => openStoryViewer(conv.other_user.id, displayName, conv.other_user.avatar_url)
+                  : undefined}
               />
               );
             })}
@@ -452,6 +656,45 @@ const ChatList: React.FC = () => {
           ]}
         />
 
+        <IonActionSheet
+          isOpen={showMyStorySheet}
+          onDidDismiss={() => setShowMyStorySheet(false)}
+          header="My Story"
+          buttons={[
+            ...(ownActiveStories.length > 0
+              ? [{
+                text: `View Stories (${ownActiveStories.length})`,
+                icon: eyeOutline,
+                handler: () => openStoryViewer(
+                  user!.id,
+                  profile?.display_name || profile?.username || 'Me',
+                  profile?.avatar_url || null,
+                  true
+                ),
+              }]
+              : []),
+            {
+              text: 'Add Image',
+              icon: imageOutline,
+              handler: () => storyImageInputRef.current?.click(),
+            },
+            {
+              text: 'Add Video',
+              icon: videocamOutline,
+              handler: () => storyVideoInputRef.current?.click(),
+            },
+            ...(ownActiveStories.length > 0
+              ? [{
+                text: 'Delete All Active Stories',
+                role: 'destructive' as const,
+                icon: trashOutline,
+                handler: () => setConfirmDeleteAllStories(true),
+              }]
+              : []),
+            { text: 'Cancel', role: 'cancel' as const },
+          ]}
+        />
+
         {/* Hidden file inputs for story upload */}
         <input
           type="file"
@@ -468,14 +711,32 @@ const ChatList: React.FC = () => {
           onChange={(e) => handleStoryFileSelected(e, 'video')}
         />
 
-        {selectedStory && (
-          <MediaViewerModal
-            isOpen={Boolean(selectedStory)}
-            src={selectedStory.media_url}
-            type={selectedStory.media_type}
-            onClose={() => setSelectedStory(null)}
+        {storyViewerContext && viewerStories.length > 0 && (
+          <StoryViewerModal
+            isOpen={Boolean(storyViewerContext)}
+            stories={viewerStories}
+            ownerName={storyViewerContext.displayName}
+            ownerAvatarUrl={storyViewerContext.avatarUrl}
+            canDelete={storyViewerContext.isOwn}
+            onDeleteStory={handleDeleteStory}
+            onClose={() => setStoryViewerContext(null)}
           />
         )}
+
+        <IonAlert
+          isOpen={confirmDeleteAllStories}
+          header="Delete Stories?"
+          message={`Delete all ${ownActiveStories.length} active stories?`}
+          onDidDismiss={() => setConfirmDeleteAllStories(false)}
+          buttons={[
+            { text: 'Cancel', role: 'cancel' },
+            {
+              text: 'Delete',
+              role: 'destructive',
+              handler: () => void handleDeleteAllStories(),
+            },
+          ]}
+        />
       </IonContent>
     </IonPage>
   );
