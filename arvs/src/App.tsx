@@ -1,3 +1,4 @@
+import { useEffect } from 'react';
 import { Redirect, Route } from 'react-router-dom';
 import {
   IonApp,
@@ -15,6 +16,7 @@ import { chatbubblesOutline, personOutline } from 'ionicons/icons';
 import { useAuth } from './hooks/useAuth';
 
 import PushNotificationManager from './components/PushNotificationManager';
+import { initializeThemeMode } from './services/themeService';
 import Login from './pages/Login';
 import SignUp from './pages/SignUp';
 import ChatList from './pages/ChatList';
@@ -47,8 +49,7 @@ import '@ionic/react/css/display.css';
  */
 
 /* import '@ionic/react/css/palettes/dark.always.css'; */
-/* import '@ionic/react/css/palettes/dark.class.css'; */
-import '@ionic/react/css/palettes/dark.system.css';
+import '@ionic/react/css/palettes/dark.class.css';
 
 /* Theme variables */
 import './theme/variables.css';
@@ -57,6 +58,10 @@ setupIonicReact();
 
 const App: React.FC = () => {
   const { session, loading } = useAuth();
+
+  useEffect(() => {
+    initializeThemeMode();
+  }, []);
 
   if (loading) {
     return (

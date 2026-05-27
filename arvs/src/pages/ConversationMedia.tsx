@@ -19,7 +19,6 @@ import {
   IonToolbar,
   useIonToast,
 } from '@ionic/react';
-import { Browser } from '@capacitor/browser';
 import { documentOutline, playCircleOutline } from 'ionicons/icons';
 import { IonIcon } from '@ionic/react';
 import { useParams } from 'react-router-dom';
@@ -177,10 +176,12 @@ export default function ConversationMedia() {
                       detail={false}
                       className="conversation-file-item"
                       onClick={() => {
-                        if (!item.media_url) {
-                          return;
-                        }
-                        void Browser.open({ url: item.media_url });
+                        void presentToast({
+                          message: 'Auto-download is disabled in this app build.',
+                          duration: 1800,
+                          color: 'medium',
+                          position: 'top',
+                        });
                       }}
                     >
                       <IonIcon icon={documentOutline} slot="start" />

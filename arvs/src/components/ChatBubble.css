@@ -154,10 +154,95 @@
 }
 
 .bubble-video {
-  max-width: 100%;
+  width: 100%;
   max-height: 300px;
-  border-radius: 12px;
+  border-radius: 12px 12px 0 0;
   display: block;
+  background: #000;
+  object-fit: cover;
+}
+
+.bubble-video-shell {
+  position: relative;
+  border-radius: 12px;
+  overflow: hidden;
+  background: #000;
+  border: 1px solid rgba(255, 255, 255, 0.14);
+}
+
+.bubble-video-center-play {
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  transform: translate(-50%, -50%);
+  width: 56px;
+  height: 56px;
+  border-radius: 999px;
+  border: 0;
+  background: rgba(15, 23, 42, 0.68);
+  color: #fff;
+  display: grid;
+  place-items: center;
+  backdrop-filter: blur(4px);
+  z-index: 2;
+}
+
+.bubble-video-center-play ion-icon {
+  font-size: 1.6rem;
+}
+
+.bubble-video-controls {
+  display: grid;
+  grid-template-columns: auto auto 1fr auto auto;
+  align-items: center;
+  gap: 0.35rem;
+  padding: 0.5rem 0.45rem;
+  background: linear-gradient(to top, rgba(2, 6, 23, 0.96), rgba(2, 6, 23, 0.82));
+}
+
+.bubble-video-control-btn {
+  width: 28px;
+  height: 28px;
+  border: 0;
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.16);
+  color: #fff;
+  display: grid;
+  place-items: center;
+  padding: 0;
+}
+
+.bubble-video-control-btn ion-icon {
+  font-size: 0.95rem;
+}
+
+.bubble-video-seek {
+  width: 100%;
+  accent-color: #8b5cf6;
+}
+
+.bubble-video-time {
+  font-size: 0.64rem;
+  color: rgba(255, 255, 255, 0.85);
+  min-width: 72px;
+  text-align: right;
+  font-weight: 600;
+}
+
+.bubble-theirs .bubble-video-shell {
+  border-color: rgba(100, 116, 139, 0.28);
+}
+
+.bubble-theirs .bubble-video-controls {
+  background: linear-gradient(to top, rgba(15, 23, 42, 0.95), rgba(15, 23, 42, 0.8));
+}
+
+.bubble-theirs .bubble-video-seek {
+  accent-color: #60a5fa;
+}
+
+.bubble-media .bubble-time {
+  margin-top: 0.3rem;
 }
 
 .bubble-file-button {

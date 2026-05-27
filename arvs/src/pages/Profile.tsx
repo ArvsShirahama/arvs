@@ -5,14 +5,22 @@ import {
   IonHeader,
   IonToolbar,
   IonTitle,
+  IonItem,
+  IonLabel,
   IonInput,
   IonButton,
+  IonToggle,
   IonText,
   IonSpinner,
   useIonRouter,
   useIonToast,
 } from '@ionic/react';
 import { useAuth } from '../hooks/useAuth';
+import {
+  onThemeModeChange,
+  resolveThemeMode,
+  setThemeMode,
+} from '../services/themeService';
 import { supabase } from '../supabaseClient';
 import Avatar from '../components/Avatar';
 import './Profile.css';
@@ -27,11 +35,18 @@ const Profile: React.FC = () => {
   const [username, setUsername] = useState(profile?.username ?? '');
   const [saving, setSaving] = useState(false);
   const [uploading, setUploading] = useState(false);
+  const [darkModeEnabled, setDarkModeEnabled] = useState(resolveThemeMode() === 'dark');
 
   useEffect(() => {
     setDisplayName(profile?.display_name ?? '');
     setUsername(profile?.username ?? '');
   }, [profile?.id, profile?.display_name, profile?.username]);
+
+  useEffect(() => {
+    return onThemeModeChange((mode) => {
+      setDarkModeEnabled(mode === 'dark');
+    });
+  }, []);
 
   const handleSave = async () => {
     if (!user) return;
@@ -93,6 +108,12 @@ const Profile: React.FC = () => {
     router.push('/login', 'root', 'replace');
   };
 
+  const handleThemeToggle = (checked: boolean) => {
+    const mode = checked ? 'dark' : 'light';
+    setDarkModeEnabled(checked);
+    setThemeMode(mode);
+  };
+
   return (
     <IonPage>
       <IonHeader>
@@ -147,6 +168,18 @@ const Profile: React.FC = () => {
               readonly
               className="profile-input"
             />
+
+            <IonItem lines="none" className="profile-theme-item">
+              <IonLabel>
+                <h3>Dark Mode</h3>
+                <p>Toggle app appearance between light and dark.</p>
+              </IonLabel>
+              <IonToggle
+                checked={darkModeEnabled}
+                onIonChange={(event) => handleThemeToggle(event.detail.checked)}
+                aria-label="Toggle dark mode"
+              />
+            </IonItem>
 
             <IonButton
               expand="block"

@@ -42,6 +42,25 @@
   --border-radius: 12px;
 }
 
+.profile-theme-item {
+  --background: var(--ion-color-step-50, rgba(127, 127, 127, 0.08));
+  --border-radius: 12px;
+  border-radius: 12px;
+  padding-inline: 4px;
+}
+
+.profile-theme-item h3 {
+  margin: 0;
+  font-size: 0.95rem;
+  font-weight: 600;
+}
+
+.profile-theme-item p {
+  margin: 0.15rem 0 0;
+  font-size: 0.78rem;
+  color: var(--ion-color-medium);
+}
+
 .profile-save-btn {
   --border-radius: 12px;
   margin-top: 0.5rem;

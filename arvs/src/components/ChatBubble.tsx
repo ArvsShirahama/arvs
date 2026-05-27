@@ -1,7 +1,13 @@
 import { useState, useRef, useCallback } from 'react';
-import { Browser } from '@capacitor/browser';
-import { documentOutline } from 'ionicons/icons';
-import { IonActionSheet, IonIcon } from '@ionic/react';
+import {
+  documentOutline,
+  expandOutline,
+  pause,
+  play,
+  volumeHigh,
+  volumeMute,
+} from 'ionicons/icons';
+import { IonActionSheet, IonIcon, useIonToast } from '@ionic/react';
 import type { Message, MessageStatus } from '../types/database';
 import { formatFileSize } from '../services/conversationThemes';
 import './ChatBubble.css';
@@ -25,6 +31,14 @@ function formatFullTime(dateStr: string): string {
     hour: '2-digit',
     minute: '2-digit',
   });
+}
+
+function formatDuration(seconds: number): string {
+  if (!Number.isFinite(seconds) || seconds <= 0) return '0:00';
+  const wholeSeconds = Math.floor(seconds);
+  const mins = Math.floor(wholeSeconds / 60);
+  const secs = wholeSeconds % 60;
+  return `${mins}:${secs.toString().padStart(2, '0')}`;
 }
 
 function StatusIcon({ status, onTap }: { status: MessageStatus; onTap: () => void }) {
@@ -54,6 +68,7 @@ function StatusIcon({ status, onTap }: { status: MessageStatus; onTap: () => voi
 }
 
 export default function ChatBubble({ message, isMine, onMediaOpen, onEdit, onDelete }: ChatBubbleProps) {
+  const [presentToast] = useIonToast();
   const isMedia = message.message_type === 'image' || message.message_type === 'video' || message.message_type === 'file';
   const isTextOnly = message.message_type === 'text';
   const isStoryReply =
@@ -63,6 +78,11 @@ export default function ChatBubble({ message, isMine, onMediaOpen, onEdit, onDel
 
   const [showActions, setShowActions] = useState(false);
   const [showReadInfo, setShowReadInfo] = useState(false);
+  const [videoPlaying, setVideoPlaying] = useState(false);
+  const [videoMuted, setVideoMuted] = useState(true);
+  const [videoCurrentTime, setVideoCurrentTime] = useState(0);
+  const [videoDuration, setVideoDuration] = useState(0);
+  const videoRef = useRef<HTMLVideoElement | null>(null);
   const longPressTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const didLongPress = useRef(false);
 
@@ -85,6 +105,35 @@ export default function ChatBubble({ message, isMine, onMediaOpen, onEdit, onDel
     e.preventDefault();
     setShowActions(true);
   }, []);
+
+  const toggleVideoPlayback = useCallback(async () => {
+    if (!videoRef.current) return;
+    if (videoPlaying) {
+      videoRef.current.pause();
+      setVideoPlaying(false);
+      return;
+    }
+    try {
+      await videoRef.current.play();
+      setVideoPlaying(true);
+    } catch {
+      setVideoPlaying(false);
+    }
+  }, [videoPlaying]);
+
+  const handleVideoSeek = useCallback((event: React.ChangeEvent<HTMLInputElement>) => {
+    if (!videoRef.current) return;
+    const nextTime = Number(event.target.value);
+    videoRef.current.currentTime = nextTime;
+    setVideoCurrentTime(nextTime);
+  }, []);
+
+  const toggleVideoMute = useCallback(() => {
+    if (!videoRef.current) return;
+    const nextMuted = !videoMuted;
+    videoRef.current.muted = nextMuted;
+    setVideoMuted(nextMuted);
+  }, [videoMuted]);
 
   const actionButtons = [];
   if (message.content) {
@@ -144,19 +193,96 @@ export default function ChatBubble({ message, isMine, onMediaOpen, onEdit, onDel
           </button>
         )}
         {message.message_type === 'video' && message.media_url && (
-          <video
-            className="bubble-video"
-            src={message.media_url}
-            controls
-            preload="metadata"
-          />
+          <div className="bubble-video-shell">
+            <video
+              ref={videoRef}
+              className="bubble-video"
+              src={message.media_url}
+              muted={videoMuted}
+              playsInline
+              preload="metadata"
+              onLoadedMetadata={(event) => {
+                const duration = event.currentTarget.duration || 0;
+                setVideoDuration(duration);
+              }}
+              onTimeUpdate={(event) => {
+                setVideoCurrentTime(event.currentTarget.currentTime || 0);
+              }}
+              onPause={() => setVideoPlaying(false)}
+              onPlay={() => setVideoPlaying(true)}
+              onEnded={() => {
+                setVideoPlaying(false);
+                setVideoCurrentTime(0);
+              }}
+            />
+
+            {!videoPlaying && (
+              <button
+                type="button"
+                className="bubble-video-center-play"
+                onClick={() => void toggleVideoPlayback()}
+                aria-label="Play video"
+              >
+                <IonIcon icon={play} />
+              </button>
+            )}
+
+            <div className="bubble-video-controls">
+              <button
+                type="button"
+                className="bubble-video-control-btn"
+                onClick={() => void toggleVideoPlayback()}
+                aria-label={videoPlaying ? 'Pause video' : 'Play video'}
+              >
+                <IonIcon icon={videoPlaying ? pause : play} />
+              </button>
+
+              <button
+                type="button"
+                className="bubble-video-control-btn"
+                onClick={toggleVideoMute}
+                aria-label={videoMuted ? 'Unmute video' : 'Mute video'}
+              >
+                <IonIcon icon={videoMuted ? volumeMute : volumeHigh} />
+              </button>
+
+              <input
+                type="range"
+                min={0}
+                max={Math.max(videoDuration, 0)}
+                step={0.1}
+                value={Math.min(videoCurrentTime, videoDuration || 0)}
+                onChange={handleVideoSeek}
+                className="bubble-video-seek"
+                aria-label="Seek video"
+              />
+
+              <span className="bubble-video-time">
+                {formatDuration(videoCurrentTime)} / {formatDuration(videoDuration)}
+              </span>
+
+              <button
+                type="button"
+                className="bubble-video-control-btn"
+                onClick={() => onMediaOpen?.(message.media_url!, 'video')}
+                aria-label="Open video"
+              >
+                <IonIcon icon={expandOutline} />
+              </button>
+            </div>
+          </div>
         )}
         {message.message_type === 'file' && message.media_url && (
           <button
             type="button"
             className="bubble-file-button"
             onClick={() => {
-              void Browser.open({ url: message.media_url! });
+              void presentToast({
+                message: 'Auto-download is disabled in this app build.',
+                duration: 1800,
+                color: 'medium',
+                position: 'top',
+              });
             }}
           >
             <span className="bubble-file-icon">
