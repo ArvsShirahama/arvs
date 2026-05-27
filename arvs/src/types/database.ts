@@ -100,3 +100,16 @@ export interface PaginatedMessagesState {
 export interface ConversationMediaFilter {
   type: 'all' | 'image' | 'video' | 'file';
 }
+
+export type StoryMediaType = 'image' | 'video';
+
+export interface Story {
+  id: string;
+  user_id: string;
+  media_url: string;
+  media_path: string;
+  media_type: StoryMediaType;
+  caption: string;
+  created_at: string;
+  expires_at: string;
+}

@@ -460,7 +460,12 @@ const Chat: React.FC = () => {
       />
 
       <VideoCallModal
-        isOpen={videoCall.callStatus === 'calling' || videoCall.callStatus === 'active' || videoCall.callStatus === 'ended'}
+        isOpen={
+          videoCall.callStatus === 'calling'
+          || videoCall.callStatus === 'connecting'
+          || videoCall.callStatus === 'active'
+          || videoCall.callStatus === 'ended'
+        }
         callStatus={videoCall.callStatus}
         localStream={videoCall.localStream}
         remoteStream={videoCall.remoteStream}

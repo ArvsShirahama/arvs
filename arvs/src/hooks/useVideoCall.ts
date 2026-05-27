@@ -1,27 +1,28 @@
 /**
  * useVideoCall Hook
  *
- * Bridges the callSignaling service to React component state.
- * Manages the call state machine: idle → calling → ringing → active → ended.
+ * React bridge for callSignaling service.
+ * Uses transport-level state (ICE/PC) to decide when call is truly active.
  */
 
 import { useCallback, useEffect, useRef, useState } from 'react';
 import {
-  startCall,
   acceptCall,
-  endCall,
   cleanup,
   cleanupCall,
+  endCall,
   onSignal,
+  startCall,
   subscribeToCallSignals,
   toggleMute,
   toggleVideo,
 } from '../services/callSignaling';
 import type { SignalPayload } from '../services/callSignaling';
 
-export type CallStatus = 'idle' | 'calling' | 'ringing' | 'active' | 'ended';
+export type CallStatus = 'idle' | 'calling' | 'ringing' | 'connecting' | 'active' | 'ended';
 
 export interface IncomingCallInfo {
+  callId: string;
   from: string;
   conversationId: string;
   offerSdp: string;
@@ -43,6 +44,8 @@ export interface UseVideoCallReturn {
   toggleCameraOff: () => void;
 }
 
+const OUTGOING_RING_TIMEOUT_MS = 30_000;
+
 export function useVideoCall(conversationId: string, localUserId: string | undefined): UseVideoCallReturn {
   const [callStatus, setCallStatus] = useState<CallStatus>('idle');
   const [localStream, setLocalStream] = useState<MediaStream | null>(null);
@@ -53,25 +56,30 @@ export function useVideoCall(conversationId: string, localUserId: string | undef
   const [callDuration, setCallDuration] = useState(0);
 
   const durationIntervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
+  const unansweredTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const callStatusRef = useRef<CallStatus>('idle');
+  const activeCallIdRef = useRef<string | null>(null);
 
-  // Keep ref in sync with state for use in signal callback
   useEffect(() => {
     callStatusRef.current = callStatus;
   }, [callStatus]);
 
-  // Start duration timer when call becomes active
+  const clearUnansweredTimeout = useCallback(() => {
+    if (unansweredTimeoutRef.current) {
+      clearTimeout(unansweredTimeoutRef.current);
+      unansweredTimeoutRef.current = null;
+    }
+  }, []);
+
   useEffect(() => {
     if (callStatus === 'active') {
       setCallDuration(0);
       durationIntervalRef.current = setInterval(() => {
         setCallDuration((prev) => prev + 1);
       }, 1000);
-    } else {
-      if (durationIntervalRef.current) {
-        clearInterval(durationIntervalRef.current);
-        durationIntervalRef.current = null;
-      }
+    } else if (durationIntervalRef.current) {
+      clearInterval(durationIntervalRef.current);
+      durationIntervalRef.current = null;
     }
 
     return () => {
@@ -81,55 +89,115 @@ export function useVideoCall(conversationId: string, localUserId: string | undef
     };
   }, [callStatus]);
 
-  // Helper to fully reset call state to ended → idle
+  useEffect(() => {
+    if (callStatus !== 'calling') {
+      clearUnansweredTimeout();
+      return;
+    }
+
+    unansweredTimeoutRef.current = setTimeout(() => {
+      if (callStatusRef.current === 'calling' || callStatusRef.current === 'connecting') {
+        void endCall('hangup');
+        cleanupCall();
+        setCallStatus('ended');
+        setIncomingCall(null);
+        setLocalStream(null);
+        setRemoteStream(null);
+        setTimeout(() => {
+          setCallStatus('idle');
+        }, 1200);
+      }
+    }, OUTGOING_RING_TIMEOUT_MS);
+
+    return clearUnansweredTimeout;
+  }, [callStatus, clearUnansweredTimeout]);
+
   const resetToEnded = useCallback(() => {
+    clearUnansweredTimeout();
     setCallStatus('ended');
     setIncomingCall(null);
     setLocalStream(null);
     setRemoteStream(null);
     setIsMuted(false);
     setIsVideoOff(false);
+    activeCallIdRef.current = null;
 
     setTimeout(() => {
       setCallStatus('idle');
     }, 1500);
-  }, []);
+  }, [clearUnansweredTimeout]);
 
-  // Subscribe to signaling channel and listen for signals
   useEffect(() => {
     if (!conversationId || !localUserId) return;
 
-    subscribeToCallSignals(conversationId, localUserId);
+    void subscribeToCallSignals(conversationId, localUserId).catch((error) => {
+      console.error('[Call] Failed to subscribe to signaling channel:', error);
+    });
 
     const unsubscribe = onSignal((signal: SignalPayload) => {
       switch (signal.type) {
         case 'offer': {
-          // Someone is calling us
+          if (!signal.sdp || !signal.callId) return;
+
           if (callStatusRef.current === 'idle') {
+            activeCallIdRef.current = signal.callId;
             setIncomingCall({
+              callId: signal.callId,
               from: signal.from,
               conversationId: signal.conversationId,
-              offerSdp: signal.sdp ?? '',
+              offerSdp: signal.sdp,
             });
             setCallStatus('ringing');
           } else {
-            // We're already in a call — send busy signal
-            endCall('busy');
+            void endCall('busy');
           }
           break;
         }
 
         case 'answer': {
-          // Our call was accepted — transition to active
+          if (signal.callId && activeCallIdRef.current && signal.callId !== activeCallIdRef.current) {
+            return;
+          }
           if (callStatusRef.current === 'calling') {
-            setCallStatus('active');
+            setCallStatus('connecting');
           }
           break;
         }
 
-        case 'hangup': {
-          // Remote peer hung up or ICE connection failed
-          // Only clean up if we're in an active/calling/ringing state
+        case 'connection-state': {
+          if (signal.callId && activeCallIdRef.current && signal.callId !== activeCallIdRef.current) {
+            return;
+          }
+
+          const iceState = signal.iceConnectionState;
+          const pcState = signal.peerConnectionState;
+
+          if (pcState === 'connected' || iceState === 'connected' || iceState === 'completed') {
+            setCallStatus('active');
+            clearUnansweredTimeout();
+            break;
+          }
+
+          if (pcState === 'connecting' || iceState === 'checking' || iceState === 'new') {
+            if (callStatusRef.current === 'calling' || callStatusRef.current === 'ringing' || callStatusRef.current === 'active') {
+              setCallStatus('connecting');
+            }
+            break;
+          }
+
+          if (pcState === 'failed' || pcState === 'closed' || iceState === 'failed') {
+            cleanupCall();
+            resetToEnded();
+          }
+          break;
+        }
+
+        case 'hangup':
+        case 'reject':
+        case 'busy': {
+          if (signal.callId && activeCallIdRef.current && signal.callId !== activeCallIdRef.current) {
+            return;
+          }
           if (callStatusRef.current !== 'idle' && callStatusRef.current !== 'ended') {
             cleanupCall();
             resetToEnded();
@@ -137,21 +205,10 @@ export function useVideoCall(conversationId: string, localUserId: string | undef
           break;
         }
 
-        case 'reject': {
-          // Our call was rejected
-          cleanupCall();
-          resetToEnded();
-          break;
-        }
-
-        case 'busy': {
-          // Remote peer is already in a call
-          cleanupCall();
-          resetToEnded();
-          break;
-        }
-
         case 'remote-stream': {
+          if (signal.callId && activeCallIdRef.current && signal.callId !== activeCallIdRef.current) {
+            return;
+          }
           if (signal.stream) {
             setRemoteStream(signal.stream);
           }
@@ -166,28 +223,29 @@ export function useVideoCall(conversationId: string, localUserId: string | undef
     return () => {
       unsubscribe();
     };
-  }, [conversationId, localUserId, resetToEnded]);
+  }, [conversationId, localUserId, resetToEnded, clearUnansweredTimeout]);
 
-  // Full cleanup on unmount (including signaling channel)
   useEffect(() => {
     return () => {
+      clearUnansweredTimeout();
       if (callStatusRef.current !== 'idle') {
-        endCall('hangup');
+        void endCall('hangup');
       }
-      cleanup();
+      void cleanup();
     };
-  }, []);
+  }, [clearUnansweredTimeout]);
 
   const initiateCall = useCallback(async (remoteUserId: string) => {
     if (!localUserId || !conversationId) return;
 
     try {
       setCallStatus('calling');
-      const { localStream: ls, remoteStream: rs } = await startCall(
+      const { callId, localStream: ls, remoteStream: rs } = await startCall(
         conversationId,
         localUserId,
         remoteUserId
       );
+      activeCallIdRef.current = callId;
       setLocalStream(ls);
       setRemoteStream(rs);
     } catch (err) {
@@ -201,15 +259,17 @@ export function useVideoCall(conversationId: string, localUserId: string | undef
     if (!localUserId || !incomingCall) return;
 
     try {
-      const { localStream: ls, remoteStream: rs } = await acceptCall(
+      const { callId, localStream: ls, remoteStream: rs } = await acceptCall(
         incomingCall.conversationId,
         localUserId,
         incomingCall.from,
+        incomingCall.callId,
         incomingCall.offerSdp
       );
+      activeCallIdRef.current = callId;
       setLocalStream(ls);
       setRemoteStream(rs);
-      setCallStatus('active');
+      setCallStatus('connecting');
       setIncomingCall(null);
     } catch (err) {
       console.error('[Call] Failed to accept call:', err);
@@ -220,13 +280,14 @@ export function useVideoCall(conversationId: string, localUserId: string | undef
   }, [localUserId, incomingCall]);
 
   const rejectIncomingCall = useCallback(() => {
-    endCall('reject');
+    void endCall('reject');
     setCallStatus('idle');
     setIncomingCall(null);
+    activeCallIdRef.current = null;
   }, []);
 
   const hangUp = useCallback(() => {
-    endCall('hangup');
+    void endCall('hangup');
     resetToEnded();
   }, [resetToEnded]);
 

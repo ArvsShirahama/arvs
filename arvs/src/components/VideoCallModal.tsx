@@ -143,6 +143,8 @@ export default function VideoCallModal({
       ? 'Calling...'
       : callStatus === 'ringing'
         ? 'Ringing...'
+        : callStatus === 'connecting'
+          ? 'Connecting...'
         : callStatus === 'active'
           ? formatDuration(callDuration)
           : callStatus === 'ended'

@@ -1,104 +1,96 @@
 /**
  * Call Signaling Service
  *
- * Handles WebRTC peer connection setup and Supabase Realtime broadcast
- * signaling for 1-on-1 video calls. Zero external dependencies.
- *
- * Key design choices:
- * - ICE candidates are BUFFERED until the remote description is set.
- *   This prevents the #1 cause of "call connects but no media" bugs.
- * - Supabase broadcast channels are used for signaling (no DB table needed).
- * - A deterministic tiebreaker handles simultaneous call initiation.
- * - TURN relay servers are included for symmetric NAT traversal (mobile carriers).
- * - ICE `disconnected` state has a grace period before hangup (mobile networks).
+ * WebRTC + Supabase Realtime broadcast for 1:1 video calls.
+ * Must-fix guarantees:
+ * - Waits for channel SUBSCRIBED before sending any offer/answer/ICE.
+ * - Scopes every signal with callId to prevent stale signal crossover.
+ * - Emits transport state so UI can reflect real connection truth.
+ * - Uses env-based TURN configuration (no hardcoded credentials).
  */
 
 import { supabase } from '../supabaseClient';
 
-// ---------------------------------------------------------------------------
-// Types
-// ---------------------------------------------------------------------------
-
-export type SignalType = 'offer' | 'answer' | 'ice-candidate' | 'hangup' | 'reject' | 'busy' | 'remote-stream';
+export type SignalType =
+  | 'offer'
+  | 'answer'
+  | 'ice-candidate'
+  | 'hangup'
+  | 'reject'
+  | 'busy'
+  | 'remote-stream'
+  | 'connection-state';
 
 export interface SignalPayload {
   type: SignalType;
   from: string;
   to: string;
   conversationId: string;
+  callId: string;
   sdp?: string;
   candidate?: RTCIceCandidateInit | null;
   stream?: MediaStream;
+  peerConnectionState?: RTCPeerConnectionState;
+  iceConnectionState?: RTCIceConnectionState;
 }
 
 export type SignalCallback = (payload: SignalPayload) => void;
 
-// ---------------------------------------------------------------------------
-// STUN + TURN configuration
-// TURN servers are essential for mobile-to-mobile calls where both peers
-// are behind symmetric NAT (common on mobile carriers).
-// ---------------------------------------------------------------------------
-
-const RTC_CONFIG: RTCConfiguration = {
-  iceServers: [
-    { urls: 'stun:stun.l.google.com:19302' },
-    { urls: 'stun:stun1.l.google.com:19302' },
-    // Free TURN relay servers for NAT traversal on mobile networks
-    {
-      urls: 'turn:a.relay.metered.ca:80',
-      username: 'e8dd65b92f6deb11e6080e8c',
-      credential: '3RFEjIhfac6FJKXR',
-    },
-    {
-      urls: 'turn:a.relay.metered.ca:80?transport=tcp',
-      username: 'e8dd65b92f6deb11e6080e8c',
-      credential: '3RFEjIhfac6FJKXR',
-    },
-    {
-      urls: 'turn:a.relay.metered.ca:443',
-      username: 'e8dd65b92f6deb11e6080e8c',
-      credential: '3RFEjIhfac6FJKXR',
-    },
-    {
-      urls: 'turns:a.relay.metered.ca:443',
-      username: 'e8dd65b92f6deb11e6080e8c',
-      credential: '3RFEjIhfac6FJKXR',
-    },
-  ],
-  // Prefer relay candidates to ensure connectivity on restrictive networks
-  iceTransportPolicy: 'all',
-};
-
-// Grace period before treating ICE `disconnected` as fatal (ms).
-// Mobile networks frequently bounce between connected/disconnected.
 const ICE_DISCONNECTED_TIMEOUT_MS = 5000;
 
-// ---------------------------------------------------------------------------
-// Module state (singleton — only one call at a time)
-// ---------------------------------------------------------------------------
+function buildIceServers(): RTCIceServer[] {
+  const servers: RTCIceServer[] = [
+    { urls: 'stun:stun.l.google.com:19302' },
+    { urls: 'stun:stun1.l.google.com:19302' },
+  ];
+
+  const turnUrlsRaw = import.meta.env.VITE_TURN_URL as string | undefined;
+  const turnUsername = import.meta.env.VITE_TURN_USERNAME as string | undefined;
+  const turnCredential = import.meta.env.VITE_TURN_CREDENTIAL as string | undefined;
+
+  if (turnUrlsRaw && turnUsername && turnCredential) {
+    const urls = turnUrlsRaw
+      .split(',')
+      .map((value) => value.trim())
+      .filter(Boolean);
+
+    if (urls.length > 0) {
+      servers.push({
+        urls,
+        username: turnUsername,
+        credential: turnCredential,
+      });
+    }
+  }
+
+  return servers;
+}
+
+function getRtcConfig(): RTCConfiguration {
+  return {
+    iceServers: buildIceServers(),
+    iceTransportPolicy: 'all',
+  };
+}
 
 let peerConnection: RTCPeerConnection | null = null;
 let localStream: MediaStream | null = null;
 let remoteStream: MediaStream | null = null;
 let signalingChannel: ReturnType<typeof supabase.channel> | null = null;
+let channelReadyPromise: Promise<void> | null = null;
+
 let isRemoteDescriptionSet = false;
 let pendingIceCandidates: RTCIceCandidateInit[] = [];
 let signalListeners: SignalCallback[] = [];
 let currentConversationId: string | null = null;
 let currentLocalUserId: string | null = null;
+let currentRemoteUserId: string | null = null;
+let currentCallId: string | null = null;
 let disconnectedTimer: ReturnType<typeof setTimeout> | null = null;
-
-// ---------------------------------------------------------------------------
-// Helpers
-// ---------------------------------------------------------------------------
+let channelGeneration = 0;
 
 function getChannelName(conversationId: string): string {
   return `call-signal-${conversationId}`;
-}
-
-/** Deterministic tiebreaker: lower user ID wins and becomes the offerer. */
-export function isOfferer(localUserId: string, remoteUserId: string): boolean {
-  return localUserId < remoteUserId;
 }
 
 function clearDisconnectedTimer(): void {
@@ -108,61 +100,107 @@ function clearDisconnectedTimer(): void {
   }
 }
 
-// ---------------------------------------------------------------------------
-// Signaling channel (Supabase Realtime broadcast)
-// ---------------------------------------------------------------------------
+function emitSignal(payload: SignalPayload): void {
+  for (const listener of signalListeners) {
+    listener(payload);
+  }
+}
 
-function ensureSignalingChannel(conversationId: string, localUserId: string): void {
-  if (signalingChannel && currentConversationId === conversationId) {
-    return;
+function emitConnectionState(
+  conversationId: string,
+  localUserId: string,
+  callId: string,
+  pc: RTCPeerConnection
+): void {
+  emitSignal({
+    type: 'connection-state',
+    from: 'system',
+    to: localUserId,
+    conversationId,
+    callId,
+    peerConnectionState: pc.connectionState,
+    iceConnectionState: pc.iceConnectionState,
+  });
+}
+
+async function ensureSignalingChannel(conversationId: string, localUserId: string): Promise<void> {
+  if (
+    signalingChannel &&
+    channelReadyPromise &&
+    currentConversationId === conversationId &&
+    currentLocalUserId === localUserId
+  ) {
+    return channelReadyPromise;
   }
 
-  // Clean up any previous channel
   if (signalingChannel) {
-    supabase.removeChannel(signalingChannel);
+    await supabase.removeChannel(signalingChannel);
     signalingChannel = null;
   }
+  channelReadyPromise = null;
+  channelGeneration += 1;
+  const generation = channelGeneration;
 
   currentConversationId = conversationId;
   currentLocalUserId = localUserId;
 
-  const channelName = getChannelName(conversationId);
-  signalingChannel = supabase.channel(channelName);
+  signalingChannel = supabase.channel(getChannelName(conversationId));
+  signalingChannel.on('broadcast', { event: 'signal' }, ({ payload }) => {
+    const signal = payload as SignalPayload;
 
-  signalingChannel
-    .on('broadcast', { event: 'signal' }, ({ payload }) => {
-      const signal = payload as SignalPayload;
+    if (signal.conversationId !== conversationId) return;
+    if (signal.from === localUserId) return;
+    if (signal.to && signal.to !== localUserId) return;
 
-      // Ignore our own signals
-      if (signal.from === localUserId) return;
+    // Ignore stale signals from previous call generations except incoming offer.
+    if (signal.callId && currentCallId && signal.callId !== currentCallId && signal.type !== 'offer') {
+      return;
+    }
 
-      // Notify all listeners
-      for (const listener of signalListeners) {
-        listener(signal);
+    emitSignal(signal);
+    void handleIncomingSignal(signal);
+  });
+
+  channelReadyPromise = new Promise<void>((resolve, reject) => {
+    let settled = false;
+    signalingChannel!.subscribe((status) => {
+      if (status === 'SUBSCRIBED') {
+        if (settled) return;
+        settled = true;
+        resolve();
+        return;
       }
+      if (status === 'CHANNEL_ERROR' || status === 'TIMED_OUT' || status === 'CLOSED') {
+        // Ignore CLOSED from stale/replaced channel generations.
+        if (generation !== channelGeneration) {
+          return;
+        }
+        if (settled) return;
+        settled = true;
+        reject(new Error(`Call signaling channel failed: ${status}`));
+      }
+    });
+  });
 
-      // Handle WebRTC-specific signals internally
-      void handleIncomingSignal(signal);
-    })
-    .subscribe();
+  return channelReadyPromise;
 }
 
-function sendSignal(payload: SignalPayload): void {
-  if (!signalingChannel) {
-    console.warn('[Call] Cannot send signal: no signaling channel');
-    return;
+async function sendSignal(payload: SignalPayload): Promise<void> {
+  if (!signalingChannel || !channelReadyPromise) {
+    throw new Error('Call signaling channel is not ready.');
   }
 
-  signalingChannel.send({
+  await channelReadyPromise;
+  const result = await signalingChannel.send({
     type: 'broadcast',
     event: 'signal',
     payload,
   });
-}
 
-// ---------------------------------------------------------------------------
-// Media stream helpers
-// ---------------------------------------------------------------------------
+  if (result !== 'ok') {
+    throw new Error(`Failed to send call signal: ${result}`);
+  }
+}
 
 export async function acquireLocalMedia(videoEnabled = true): Promise<MediaStream> {
   if (videoEnabled) {
@@ -174,8 +212,6 @@ export async function acquireLocalMedia(videoEnabled = true): Promise<MediaStrea
       localStream = stream;
       return stream;
     } catch (err) {
-      // Camera may be locked by another tab/process (NotReadableError) or
-      // not available (NotFoundError). Fall back to audio-only.
       console.warn('[Call] Camera unavailable, falling back to audio-only:', err);
       const audioOnlyStream = await navigator.mediaDevices.getUserMedia({
         audio: true,
@@ -201,96 +237,84 @@ export function stopLocalMedia(): void {
   }
 }
 
-// ---------------------------------------------------------------------------
-// Peer connection management
-// ---------------------------------------------------------------------------
-
-function createPeerConnection(conversationId: string, localUserId: string): RTCPeerConnection {
+function createPeerConnection(
+  conversationId: string,
+  localUserId: string,
+  remoteUserId: string,
+  callId: string
+): RTCPeerConnection {
   if (peerConnection) {
     peerConnection.close();
   }
 
   clearDisconnectedTimer();
   isRemoteDescriptionSet = false;
+  pendingIceCandidates = [];
   remoteStream = new MediaStream();
 
-  const pc = new RTCPeerConnection(RTC_CONFIG);
+  const pc = new RTCPeerConnection(getRtcConfig());
 
-  // Add local tracks to the connection
   if (localStream) {
     localStream.getTracks().forEach((track) => {
-      pc.addTrack(track, localStream!);
+      pc.addTrack(track, localStream as MediaStream);
     });
   }
 
-  // When remote tracks arrive, update the stream and notify listeners
   pc.ontrack = (event) => {
-    if (remoteStream && event.track) {
-      if (!remoteStream.getTracks().some((t) => t.id === event.track.id)) {
-        remoteStream.addTrack(event.track);
-        console.log('[Call] Added remote track:', event.track.kind);
-      }
+    if (remoteStream && event.track && !remoteStream.getTracks().some((t) => t.id === event.track.id)) {
+      remoteStream.addTrack(event.track);
     }
 
-    for (const listener of signalListeners) {
-      listener({
-        type: 'remote-stream',
-        from: 'system',
-        to: localUserId,
-        conversationId,
-        stream: remoteStream || undefined,
-      });
-    }
+    emitSignal({
+      type: 'remote-stream',
+      from: 'system',
+      to: localUserId,
+      conversationId,
+      callId,
+      stream: remoteStream ?? undefined,
+    });
   };
 
-  // When ICE candidates are generated, send them to the remote peer
   pc.onicecandidate = (event) => {
-    if (event.candidate) {
-      sendSignal({
-        type: 'ice-candidate',
-        from: localUserId,
-        to: '', // broadcast — other peer picks it up
-        conversationId,
-        candidate: event.candidate.toJSON(),
-      });
-    }
+    if (!event.candidate) return;
+    void sendSignal({
+      type: 'ice-candidate',
+      from: localUserId,
+      to: remoteUserId,
+      conversationId,
+      callId,
+      candidate: event.candidate.toJSON(),
+    });
+  };
+
+  pc.onconnectionstatechange = () => {
+    emitConnectionState(conversationId, localUserId, callId, pc);
   };
 
   pc.oniceconnectionstatechange = () => {
+    emitConnectionState(conversationId, localUserId, callId, pc);
     const state = pc.iceConnectionState;
-    console.log('[Call] ICE state:', state);
 
     switch (state) {
       case 'connected':
       case 'completed':
-        // Connection recovered or established — clear any pending disconnect timer
         clearDisconnectedTimer();
         break;
-
       case 'disconnected':
-        // Mobile networks frequently bounce to disconnected temporarily.
-        // Give it a grace period before treating as fatal.
         clearDisconnectedTimer();
         disconnectedTimer = setTimeout(() => {
-          // Check again — it may have recovered during the grace period
           if (peerConnection && peerConnection.iceConnectionState === 'disconnected') {
-            console.warn('[Call] ICE still disconnected after grace period, ending call');
-            endCall('hangup');
+            void endCall('hangup');
           }
         }, ICE_DISCONNECTED_TIMEOUT_MS);
         break;
-
       case 'failed':
-        // ICE negotiation permanently failed — end the call and notify the remote peer
         clearDisconnectedTimer();
-        console.error('[Call] ICE connection failed, ending call');
-        endCall('hangup');
+        void endCall('hangup');
         break;
-
       case 'closed':
         clearDisconnectedTimer();
         break;
-
       default:
         break;
     }
@@ -300,7 +324,6 @@ function createPeerConnection(conversationId: string, localUserId: string): RTCP
   return pc;
 }
 
-/** Flush any ICE candidates that arrived before the remote description was set. */
 async function flushPendingCandidates(): Promise<void> {
   if (!peerConnection || !isRemoteDescriptionSet) return;
 
@@ -314,14 +337,12 @@ async function flushPendingCandidates(): Promise<void> {
   pendingIceCandidates = [];
 }
 
-// ---------------------------------------------------------------------------
-// Handle incoming signals from the remote peer
-// ---------------------------------------------------------------------------
-
 async function handleIncomingSignal(signal: SignalPayload): Promise<void> {
+  if (!currentCallId || signal.callId !== currentCallId) return;
+
   switch (signal.type) {
     case 'answer': {
-      if (!peerConnection) return;
+      if (!peerConnection || !signal.sdp) return;
       try {
         await peerConnection.setRemoteDescription(
           new RTCSessionDescription({ type: 'answer', sdp: signal.sdp })
@@ -333,16 +354,12 @@ async function handleIncomingSignal(signal: SignalPayload): Promise<void> {
       }
       break;
     }
-
     case 'ice-candidate': {
       if (!signal.candidate) return;
-
       if (!peerConnection || !isRemoteDescriptionSet) {
-        // Buffer the candidate — this is THE critical fix
         pendingIceCandidates.push(signal.candidate);
         return;
       }
-
       try {
         await peerConnection.addIceCandidate(new RTCIceCandidate(signal.candidate));
       } catch (err) {
@@ -350,31 +367,24 @@ async function handleIncomingSignal(signal: SignalPayload): Promise<void> {
       }
       break;
     }
-
-    // offer, hangup, reject, busy are handled by the hook via signalListeners
     default:
       break;
   }
 }
 
-// ---------------------------------------------------------------------------
-// Public API
-// ---------------------------------------------------------------------------
-
-/**
- * Start an outgoing call. Creates the peer connection, acquires local media,
- * generates an SDP offer, and sends it via broadcast.
- */
 export async function startCall(
   conversationId: string,
   localUserId: string,
   remoteUserId: string
-): Promise<{ localStream: MediaStream; remoteStream: MediaStream }> {
-  ensureSignalingChannel(conversationId, localUserId);
+): Promise<{ callId: string; localStream: MediaStream; remoteStream: MediaStream }> {
+  await ensureSignalingChannel(conversationId, localUserId);
 
-  pendingIceCandidates = []; // Clear stale candidates before starting a new call session
+  const callId = crypto.randomUUID();
+  currentCallId = callId;
+  currentRemoteUserId = remoteUserId;
+
   const stream = await acquireLocalMedia();
-  const pc = createPeerConnection(conversationId, localUserId);
+  const pc = createPeerConnection(conversationId, localUserId, remoteUserId, callId);
 
   const offer = await pc.createOffer({
     offerToReceiveAudio: true,
@@ -382,48 +392,47 @@ export async function startCall(
   });
   await pc.setLocalDescription(offer);
 
-  sendSignal({
+  await sendSignal({
     type: 'offer',
     from: localUserId,
     to: remoteUserId,
     conversationId,
+    callId,
     sdp: offer.sdp,
   });
 
-  return { localStream: stream, remoteStream: remoteStream! };
+  return { callId, localStream: stream, remoteStream: remoteStream as MediaStream };
 }
 
-/**
- * Accept an incoming call. Creates the peer connection, acquires local media,
- * sets the remote offer, generates an SDP answer, and sends it back.
- */
 export async function acceptCall(
   conversationId: string,
   localUserId: string,
   remoteUserId: string,
+  callId: string,
   offerSdp: string
-): Promise<{ localStream: MediaStream; remoteStream: MediaStream }> {
-  ensureSignalingChannel(conversationId, localUserId);
+): Promise<{ callId: string; localStream: MediaStream; remoteStream: MediaStream }> {
+  await ensureSignalingChannel(conversationId, localUserId);
+
+  currentCallId = callId;
+  currentRemoteUserId = remoteUserId;
 
   let stream: MediaStream;
   try {
     stream = await acquireLocalMedia();
   } catch (err) {
-    // Media acquisition failed completely (no audio either).
-    // Notify the caller so they stop ringing.
     console.error('[Call] Cannot acquire any media:', err);
-    sendSignal({
+    await sendSignal({
       type: 'hangup',
       from: localUserId,
       to: remoteUserId,
       conversationId,
+      callId,
     });
     cleanupCall();
     throw err;
   }
 
-  const pc = createPeerConnection(conversationId, localUserId);
-
+  const pc = createPeerConnection(conversationId, localUserId, remoteUserId, callId);
   await pc.setRemoteDescription(new RTCSessionDescription({ type: 'offer', sdp: offerSdp }));
   isRemoteDescriptionSet = true;
   await flushPendingCandidates();
@@ -431,47 +440,72 @@ export async function acceptCall(
   const answer = await pc.createAnswer();
   await pc.setLocalDescription(answer);
 
-  sendSignal({
+  await sendSignal({
     type: 'answer',
     from: localUserId,
     to: remoteUserId,
     conversationId,
+    callId,
     sdp: answer.sdp,
   });
 
-  return { localStream: stream, remoteStream: remoteStream! };
+  return { callId, localStream: stream, remoteStream: remoteStream as MediaStream };
 }
 
-/**
- * End the current call and clean up call resources (but keep channel alive).
- * Sends a signal to the remote peer so they know the call ended.
- */
-export function endCall(reason: 'hangup' | 'reject' | 'busy' = 'hangup'): void {
-  if (currentConversationId && currentLocalUserId) {
-    sendSignal({
-      type: reason,
-      from: currentLocalUserId,
-      to: '',
-      conversationId: currentConversationId,
-    });
+export async function endCall(reason: 'hangup' | 'reject' | 'busy' = 'hangup'): Promise<void> {
+  if (currentConversationId && currentLocalUserId && currentRemoteUserId && currentCallId) {
+    try {
+      await sendSignal({
+        type: reason,
+        from: currentLocalUserId,
+        to: currentRemoteUserId,
+        conversationId: currentConversationId,
+        callId: currentCallId,
+      });
+    } catch (err) {
+      console.warn('[Call] Failed to send end signal:', err);
+    }
   }
 
   cleanupCall();
 }
 
-/**
- * Subscribe to incoming signaling channel. Used to listen for incoming calls.
- */
-export function subscribeToCallSignals(
+export async function subscribeToCallSignals(
   conversationId: string,
   localUserId: string
-): void {
-  ensureSignalingChannel(conversationId, localUserId);
+): Promise<void> {
+  let attempt = 0;
+  let lastError: unknown;
+
+  while (attempt < 3) {
+    try {
+      await ensureSignalingChannel(conversationId, localUserId);
+      return;
+    } catch (error) {
+      lastError = error;
+      attempt += 1;
+
+      const message = error instanceof Error ? error.message : String(error);
+      if (
+        !message.includes('CLOSED')
+        && !message.includes('TIMED_OUT')
+        && !message.includes('CHANNEL_ERROR')
+      ) {
+        throw error;
+      }
+
+      // Retry with short backoff for transient Realtime channel closures.
+      await new Promise<void>((resolve) => {
+        setTimeout(resolve, attempt * 250);
+      });
+    }
+  }
+
+  throw lastError instanceof Error
+    ? lastError
+    : new Error('Call signaling channel could not be established after retries.');
 }
 
-/**
- * Register a callback for incoming signals.
- */
 export function onSignal(callback: SignalCallback): () => void {
   signalListeners.push(callback);
   return () => {
@@ -479,9 +513,6 @@ export function onSignal(callback: SignalCallback): () => void {
   };
 }
 
-/**
- * Toggle the local audio track on/off.
- */
 export function toggleMute(muted: boolean): void {
   if (localStream) {
     localStream.getAudioTracks().forEach((track) => {
@@ -490,9 +521,6 @@ export function toggleMute(muted: boolean): void {
   }
 }
 
-/**
- * Toggle the local video track on/off.
- */
 export function toggleVideo(videoOff: boolean): void {
   if (localStream) {
     localStream.getVideoTracks().forEach((track) => {
@@ -501,15 +529,8 @@ export function toggleVideo(videoOff: boolean): void {
   }
 }
 
-/**
- * Clean up only call resources (peer connection + media streams).
- * Keeps the signaling channel alive so subsequent calls work.
- * Use this when ending a call normally.
- */
 export function cleanupCall(): void {
   clearDisconnectedTimer();
-
-  // Stop all media tracks
   stopLocalMedia();
 
   if (remoteStream) {
@@ -517,44 +538,38 @@ export function cleanupCall(): void {
     remoteStream = null;
   }
 
-  // Close peer connection
   if (peerConnection) {
     peerConnection.ontrack = null;
     peerConnection.onicecandidate = null;
     peerConnection.oniceconnectionstatechange = null;
+    peerConnection.onconnectionstatechange = null;
     peerConnection.close();
     peerConnection = null;
   }
 
-  // Reset call state (but NOT channel state)
   isRemoteDescriptionSet = false;
   pendingIceCandidates = [];
+  currentCallId = null;
+  currentRemoteUserId = null;
 }
 
-/**
- * Full cleanup: call resources + signaling channel.
- * Use this only when the component unmounts (leaving the chat page).
- */
-export function cleanup(): void {
+export async function cleanup(): Promise<void> {
   cleanupCall();
 
-  // Remove signaling channel
   if (signalingChannel) {
-    supabase.removeChannel(signalingChannel);
+    await supabase.removeChannel(signalingChannel);
     signalingChannel = null;
   }
-
+  channelReadyPromise = null;
   currentConversationId = null;
   currentLocalUserId = null;
 }
 
-/**
- * Get current call state for debugging.
- */
 export function getCallDebugInfo(): Record<string, unknown> {
   return {
     hasPC: !!peerConnection,
-    pcState: peerConnection?.iceConnectionState ?? 'none',
+    pcState: peerConnection?.connectionState ?? 'none',
+    iceState: peerConnection?.iceConnectionState ?? 'none',
     signalingState: peerConnection?.signalingState ?? 'none',
     hasLocalStream: !!localStream,
     localTracks: localStream?.getTracks().map((t) => `${t.kind}:${t.enabled}`) ?? [],
@@ -563,5 +578,7 @@ export function getCallDebugInfo(): Record<string, unknown> {
     remoteDescSet: isRemoteDescriptionSet,
     pendingCandidates: pendingIceCandidates.length,
     conversationId: currentConversationId,
+    callId: currentCallId,
+    remoteUserId: currentRemoteUserId,
   };
 }
