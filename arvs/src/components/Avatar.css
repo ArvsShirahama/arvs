@@ -4,6 +4,12 @@
   flex-shrink: 0;
 }
 
+.avatar-has-story {
+  border-radius: 50%;
+  padding: 2px;
+  background: linear-gradient(135deg, #fd1d1d, #fcb045 55%, #833ab4);
+}
+
 .avatar {
   flex-shrink: 0;
 }

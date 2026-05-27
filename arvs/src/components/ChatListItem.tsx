@@ -7,6 +7,8 @@ interface ChatListItemProps {
   conversation: ConversationWithDetails;
   currentUserId: string;
   isOnline?: boolean;
+  hasStory?: boolean;
+  onAvatarClick?: () => void;
 }
 
 function formatTime(dateStr: string): string {
@@ -30,7 +32,13 @@ function formatTime(dateStr: string): string {
   return date.toLocaleDateString([], { month: 'short', day: 'numeric' });
 }
 
-export default function ChatListItem({ conversation, currentUserId, isOnline = false }: ChatListItemProps) {
+export default function ChatListItem({
+  conversation,
+  currentUserId,
+  isOnline = false,
+  hasStory = false,
+  onAvatarClick,
+}: ChatListItemProps) {
   const { other_user, last_message, unread_count } = conversation;
   const isOwnMessage = last_message?.sender_id === currentUserId;
   const displayName = conversation.preference?.peer_nickname?.trim() || other_user.display_name || other_user.username;
@@ -65,13 +73,32 @@ export default function ChatListItem({ conversation, currentUserId, isOnline = f
       className="chatlist-item"
       button
     >
-      <Avatar
-        src={other_user.avatar_url}
-        name={displayName}
-        size="medium"
-        showStatus
-        isOnline={isOnline}
-      />
+      <div
+        className={onAvatarClick ? 'chatlist-item-avatar-button' : undefined}
+        onClick={onAvatarClick ? (event) => {
+          event.preventDefault();
+          event.stopPropagation();
+          onAvatarClick();
+        } : undefined}
+        onKeyDown={onAvatarClick ? (event) => {
+          if (event.key === 'Enter' || event.key === ' ') {
+            event.preventDefault();
+            event.stopPropagation();
+            onAvatarClick();
+          }
+        } : undefined}
+        role={onAvatarClick ? 'button' : undefined}
+        tabIndex={onAvatarClick ? 0 : undefined}
+      >
+        <Avatar
+          src={other_user.avatar_url}
+          name={displayName}
+          size="medium"
+          showStatus
+          isOnline={isOnline}
+          hasStoryRing={hasStory}
+        />
+      </div>
       <IonLabel className="chatlist-item-content">
         <h2 className={`chatlist-item-name ${hasUnread ? 'chatlist-unread' : ''}`}>
           {displayName}

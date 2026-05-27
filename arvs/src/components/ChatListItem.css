@@ -11,6 +11,12 @@
   margin-right: 0.75rem;
 }
 
+.chatlist-item-avatar-button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+}
+
 .chatlist-item-content {
   margin: 0;
   min-width: 0;

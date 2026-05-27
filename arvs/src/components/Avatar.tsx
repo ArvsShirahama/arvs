@@ -8,6 +8,7 @@ interface AvatarProps {
   onClick?: () => void;
   showStatus?: boolean;
   isOnline?: boolean;
+  hasStoryRing?: boolean;
 }
 
 function getInitials(name: string): string {
@@ -28,15 +29,24 @@ function hashColor(name: string): string {
   return `hsl(${hue}, 55%, 55%)`;
 }
 
-export default function Avatar({ src, name, size = 'medium', onClick, showStatus = false, isOnline = false }: AvatarProps) {
+export default function Avatar({
+  src,
+  name,
+  size = 'medium',
+  onClick,
+  showStatus = false,
+  isOnline = false,
+  hasStoryRing = false,
+}: AvatarProps) {
   const sizeClass = `avatar-${size}`;
   const statusDot = showStatus ? (
     <span className={`avatar-status-dot ${isOnline ? 'avatar-online' : 'avatar-offline'}`} />
   ) : null;
+  const wrapperClassName = `avatar-wrapper ${hasStoryRing ? 'avatar-has-story' : ''}`.trim();
 
   if (src) {
     return (
-      <div className="avatar-wrapper">
+      <div className={wrapperClassName}>
         <IonAvatar className={`avatar ${sizeClass}`} onClick={onClick}>
           <img src={src} alt={name} />
         </IonAvatar>
@@ -46,7 +56,7 @@ export default function Avatar({ src, name, size = 'medium', onClick, showStatus
   }
 
   return (
-    <div className="avatar-wrapper">
+    <div className={wrapperClassName}>
       <div
         className={`avatar avatar-initials ${sizeClass}`}
         style={{ backgroundColor: hashColor(name) }}

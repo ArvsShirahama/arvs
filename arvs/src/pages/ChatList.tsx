@@ -22,6 +22,7 @@ import { add, imageOutline, videocamOutline } from 'ionicons/icons';
 import ChatListItem from '../components/ChatListItem';
 import NewChatModal from '../components/NewChatModal';
 import Avatar from '../components/Avatar';
+import MediaViewerModal from '../components/MediaViewerModal';
 import { useAuth } from '../hooks/useAuth';
 import {
   getConversationSummary,
@@ -29,10 +30,15 @@ import {
   upsertSummaryFromRealtime,
 } from '../services/chatService';
 import { supabase } from '../supabaseClient';
-import type { ConversationWithDetails, Message } from '../types/database';
+import type { ConversationWithDetails, Message, Story, StoryMediaType } from '../types/database';
 import './ChatList.css';
 
 const SUMMARY_PAGE_SIZE = 30;
+
+type ActiveStory = Omit<Story, 'caption' | 'media_type'> & {
+  caption: string | null;
+  media_type: StoryMediaType;
+};
 
 const ChatList: React.FC = () => {
   const { user, profile, onlineUsers } = useAuth();
@@ -47,6 +53,8 @@ const ChatList: React.FC = () => {
   const [showNewChat, setShowNewChat] = useState(false);
   const [showStorySheet, setShowStorySheet] = useState(false);
   const [uploadingStory, setUploadingStory] = useState(false);
+  const [storiesByUserId, setStoriesByUserId] = useState<Record<string, ActiveStory>>({});
+  const [selectedStory, setSelectedStory] = useState<ActiveStory | null>(null);
 
   // File input refs for story upload
   const storyImageInputRef = useRef<HTMLInputElement>(null);
@@ -121,6 +129,35 @@ const ChatList: React.FC = () => {
     }
   }, [user, presentToast]);
 
+  const fetchActiveStories = useCallback(async (targetUserIds: string[]) => {
+    const uniqueUserIds = Array.from(new Set(targetUserIds.filter(Boolean)));
+    if (uniqueUserIds.length === 0) {
+      setStoriesByUserId({});
+      return;
+    }
+
+    const { data, error } = await supabase
+      .from('stories')
+      .select('id,user_id,media_url,media_path,media_type,caption,created_at,expires_at')
+      .in('user_id', uniqueUserIds)
+      .gt('expires_at', new Date().toISOString())
+      .order('created_at', { ascending: false });
+
+    if (error) {
+      console.error('[ChatList] Failed to fetch stories for avatars:', error);
+      return;
+    }
+
+    const nextStories: Record<string, ActiveStory> = {};
+    for (const story of (data || []) as ActiveStory[]) {
+      if (!nextStories[story.user_id]) {
+        nextStories[story.user_id] = story;
+      }
+    }
+
+    setStoriesByUserId(nextStories);
+  }, []);
+
   const fetchConversations = useCallback(async (reset = false) => {
     if (!user) return;
 
@@ -154,6 +191,16 @@ const ChatList: React.FC = () => {
   useEffect(() => {
     fetchConversations(true);
   }, [fetchConversations]);
+
+  useEffect(() => {
+    if (!user) return;
+
+    const conversationUserIds = conversations
+      .map((conv) => conv.other_user?.id)
+      .filter((id): id is string => Boolean(id));
+
+    void fetchActiveStories(conversationUserIds);
+  }, [conversations, fetchActiveStories, user]);
 
   useEffect(() => {
     if (!user) return;
@@ -282,18 +329,27 @@ const ChatList: React.FC = () => {
               {activeUsers.map((conv) => {
                 const displayName = conv.other_user?.display_name || 'User';
                 const firstName = displayName.split(' ')[0];
+                const userStory = storiesByUserId[conv.other_user.id];
                 return (
                   <div
                     key={conv.id}
                     className="active-user-item"
                     onClick={() => router.push(`/chat/${conv.id}`, 'forward')}
                   >
-                    <div className="active-user-avatar-container">
+                    <div
+                      className="active-user-avatar-container"
+                      onClick={userStory ? (event) => {
+                        event.preventDefault();
+                        event.stopPropagation();
+                        setSelectedStory(userStory);
+                      } : undefined}
+                    >
                       <Avatar
                         src={conv.other_user?.avatar_url}
                         name={displayName}
                         showStatus={true}
                         isOnline={true}
+                        hasStoryRing={Boolean(userStory)}
                       />
                     </div>
                     <span className="active-user-name">{firstName}</span>
@@ -331,14 +387,19 @@ const ChatList: React.FC = () => {
           </div>
         ) : (
           <IonList lines="none" className="chatlist-list">
-            {filteredConversations.map((conv) => (
+            {filteredConversations.map((conv) => {
+              const story = storiesByUserId[conv.other_user.id];
+              return (
               <ChatListItem
                 key={conv.id}
                 conversation={conv}
                 currentUserId={user!.id}
                 isOnline={onlineUsers.has(conv.other_user.id)}
+                hasStory={Boolean(story)}
+                onAvatarClick={story ? () => setSelectedStory(story) : undefined}
               />
-            ))}
+              );
+            })}
           </IonList>
         )}
 
@@ -406,6 +467,15 @@ const ChatList: React.FC = () => {
           hidden
           onChange={(e) => handleStoryFileSelected(e, 'video')}
         />
+
+        {selectedStory && (
+          <MediaViewerModal
+            isOpen={Boolean(selectedStory)}
+            src={selectedStory.media_url}
+            type={selectedStory.media_type}
+            onClose={() => setSelectedStory(null)}
+          />
+        )}
       </IonContent>
     </IonPage>
   );
