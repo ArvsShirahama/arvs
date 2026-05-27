@@ -123,3 +123,114 @@
 .story-nav-next {
   right: 10px;
 }
+
+.story-interact-bar {
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  z-index: 4;
+  padding: 10px 12px calc(12px + env(safe-area-inset-bottom));
+  background: linear-gradient(to top, rgba(0, 0, 0, 0.8), rgba(0, 0, 0, 0.25));
+}
+
+.story-reaction-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  overflow-x: auto;
+  padding-bottom: 8px;
+}
+
+.story-reaction-chip {
+  border: 0;
+  border-radius: 999px;
+  background: rgba(17, 24, 39, 0.65);
+  color: #fff;
+  min-width: 42px;
+  height: 34px;
+  padding: 0 10px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 4px;
+  font-size: 1rem;
+}
+
+.story-reaction-count {
+  font-size: 0.7rem;
+  font-weight: 700;
+}
+
+.story-reply-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.story-reply-input {
+  --background: rgba(15, 23, 42, 0.72);
+  --color: #fff;
+  --placeholder-color: rgba(255, 255, 255, 0.7);
+  border-radius: 20px;
+  flex: 1;
+}
+
+.story-reply-row ion-button {
+  --border-radius: 999px;
+  width: 40px;
+  height: 40px;
+}
+
+.story-owner-interactions {
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  z-index: 4;
+  padding: 10px 12px calc(12px + env(safe-area-inset-bottom));
+  background: linear-gradient(to top, rgba(0, 0, 0, 0.82), rgba(0, 0, 0, 0.3));
+  color: #fff;
+}
+
+.story-owner-interactions-header {
+  font-size: 0.82rem;
+  font-weight: 700;
+}
+
+.story-owner-interactions-summary {
+  margin-top: 2px;
+  font-size: 0.74rem;
+  opacity: 0.88;
+}
+
+.story-owner-reply-list {
+  margin-top: 8px;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.story-owner-reply-item {
+  border-radius: 12px;
+  padding: 6px 8px;
+  background: rgba(30, 41, 59, 0.72);
+}
+
+.story-owner-reply-author {
+  display: block;
+  font-size: 0.72rem;
+  font-weight: 700;
+  margin-bottom: 2px;
+}
+
+.story-owner-reply-text {
+  display: block;
+  font-size: 0.8rem;
+}
+
+.story-owner-empty {
+  margin-top: 8px;
+  font-size: 0.78rem;
+  opacity: 0.8;
+}

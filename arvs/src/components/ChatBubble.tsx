@@ -27,7 +27,7 @@ function formatFullTime(dateStr: string): string {
   });
 }
 
-function StatusIcon({ status, readAt, onTap }: { status: MessageStatus; readAt: string | null; onTap: () => void }) {
+function StatusIcon({ status, onTap }: { status: MessageStatus; onTap: () => void }) {
   if (status === 'read') {
     return (
       <button type="button" className="bubble-status-btn" onClick={onTap} aria-label="Read receipt info">
@@ -56,6 +56,10 @@ function StatusIcon({ status, readAt, onTap }: { status: MessageStatus; readAt: 
 export default function ChatBubble({ message, isMine, onMediaOpen, onEdit, onDelete }: ChatBubbleProps) {
   const isMedia = message.message_type === 'image' || message.message_type === 'video' || message.message_type === 'file';
   const isTextOnly = message.message_type === 'text';
+  const isStoryReply =
+    message.media_name === 'Story reply'
+    && (message.message_type === 'image' || message.message_type === 'video');
+  const storyReplyLabel = isMine ? 'You replied to their story' : 'Replied to your story';
 
   const [showActions, setShowActions] = useState(false);
   const [showReadInfo, setShowReadInfo] = useState(false);
@@ -119,6 +123,11 @@ export default function ChatBubble({ message, isMine, onMediaOpen, onEdit, onDel
       onContextMenu={handleContextMenu}
     >
       <div className={`bubble ${isMine ? 'bubble-mine' : 'bubble-theirs'} ${isMedia ? 'bubble-media' : ''}`}>
+        {isStoryReply && (
+          <div className="bubble-story-reply-label">
+            {storyReplyLabel}
+          </div>
+        )}
         {message.message_type === 'image' && message.media_url && (
           <button
             type="button"
@@ -166,7 +175,6 @@ export default function ChatBubble({ message, isMine, onMediaOpen, onEdit, onDel
           {isMine && (
             <StatusIcon
               status={message.status}
-              readAt={message.read_at}
               onTap={() => setShowReadInfo((prev) => !prev)}
             />
           )}

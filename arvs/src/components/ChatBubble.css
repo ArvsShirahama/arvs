@@ -121,6 +121,22 @@
   padding: 0 0.6rem 0.25rem;
 }
 
+.bubble-story-reply-label {
+  font-size: 0.68rem;
+  font-weight: 700;
+  letter-spacing: 0.01em;
+  opacity: 0.88;
+  padding: 0.2rem 0.6rem 0.35rem;
+}
+
+.bubble-mine .bubble-story-reply-label {
+  color: rgba(255, 255, 255, 0.92);
+}
+
+.bubble-theirs .bubble-story-reply-label {
+  color: color-mix(in srgb, var(--conversation-bubble-theirs-text, var(--conversation-bubble-theirs-text-color)) 78%, #64748b);
+}
+
 .bubble-image-button {
   border: 0;
   padding: 0;

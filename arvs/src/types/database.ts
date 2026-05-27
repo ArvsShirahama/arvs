@@ -113,3 +113,19 @@ export interface Story {
   created_at: string;
   expires_at: string;
 }
+
+export interface StoryReaction {
+  id: string;
+  story_id: string;
+  user_id: string;
+  reaction: string;
+  created_at: string;
+}
+
+export interface StoryReply {
+  id: string;
+  story_id: string;
+  user_id: string;
+  content: string;
+  created_at: string;
+}

@@ -23,15 +23,26 @@ import { add, eyeOutline, imageOutline, trashOutline, videocamOutline } from 'io
 import ChatListItem from '../components/ChatListItem';
 import NewChatModal from '../components/NewChatModal';
 import Avatar from '../components/Avatar';
-import StoryViewerModal, { type StoryViewerItem } from '../components/StoryViewerModal';
+import StoryViewerModal, {
+  type StoryReactionView,
+  type StoryReplyView,
+  type StoryViewerItem,
+} from '../components/StoryViewerModal';
 import { useAuth } from '../hooks/useAuth';
 import {
   getConversationSummary,
   getSummaries,
   upsertSummaryFromRealtime,
 } from '../services/chatService';
+import { sendChatPush } from '../services/pushService';
 import { supabase } from '../supabaseClient';
-import type { ConversationWithDetails, Message, Story, StoryMediaType } from '../types/database';
+import type {
+  ConversationWithDetails,
+  Message,
+  Profile,
+  Story,
+  StoryMediaType,
+} from '../types/database';
 import './ChatList.css';
 
 const SUMMARY_PAGE_SIZE = 30;
@@ -65,6 +76,8 @@ const ChatList: React.FC = () => {
   const [uploadingStory, setUploadingStory] = useState(false);
   const [storiesByUserId, setStoriesByUserId] = useState<Record<string, ActiveStory[]>>({});
   const [storyViewerContext, setStoryViewerContext] = useState<StoryViewerContext | null>(null);
+  const [storyReactionsByStoryId, setStoryReactionsByStoryId] = useState<Record<string, StoryReactionView[]>>({});
+  const [storyRepliesByStoryId, setStoryRepliesByStoryId] = useState<Record<string, StoryReplyView[]>>({});
 
   // File input refs for story upload
   const storyImageInputRef = useRef<HTMLInputElement>(null);
@@ -95,6 +108,9 @@ const ChatList: React.FC = () => {
     if (!user) return [];
     return storiesByUserId[user.id] || [];
   }, [storiesByUserId, user]);
+  const currentUserDisplayName = useMemo(() => {
+    return profile?.display_name?.trim() || profile?.username || 'You';
+  }, [profile?.display_name, profile?.username]);
 
   const viewerStories = useMemo<StoryViewerItem[]>(() => {
     if (!storyViewerContext) return [];
@@ -152,16 +168,300 @@ const ChatList: React.FC = () => {
     });
   }, [storiesByUserId]);
 
-  const refreshStoriesForListUsers = useCallback(async () => {
+  const upsertStoryLocal = useCallback((story: ActiveStory) => {
+    const nowIso = new Date().toISOString();
+    if (story.expires_at <= nowIso) {
+      setStoriesByUserId((prev) => {
+        const current = prev[story.user_id] || [];
+        const remaining = current.filter((item) => item.id !== story.id);
+        if (remaining.length === 0) {
+          const clone = { ...prev };
+          delete clone[story.user_id];
+          return clone;
+        }
+        return {
+          ...prev,
+          [story.user_id]: remaining,
+        };
+      });
+      return;
+    }
+
+    setStoriesByUserId((prev) => {
+      const current = prev[story.user_id] || [];
+      const without = current.filter((item) => item.id !== story.id);
+      const next = [...without, story].sort((a, b) => (
+        new Date(a.created_at).getTime() - new Date(b.created_at).getTime()
+      ));
+      return {
+        ...prev,
+        [story.user_id]: next,
+      };
+    });
+  }, []);
+
+  const removeStoryLocal = useCallback((storyId: string, storyUserId: string) => {
+    setStoriesByUserId((prev) => {
+      const current = prev[storyUserId] || [];
+      const remaining = current.filter((item) => item.id !== storyId);
+      if (remaining.length === 0) {
+        const clone = { ...prev };
+        delete clone[storyUserId];
+        return clone;
+      }
+      return {
+        ...prev,
+        [storyUserId]: remaining,
+      };
+    });
+  }, []);
+
+  const loadStoryInteractions = useCallback(async (storyIds: string[]) => {
+    const uniqueStoryIds = Array.from(new Set(storyIds.filter(Boolean)));
+    if (uniqueStoryIds.length === 0) {
+      setStoryReactionsByStoryId({});
+      setStoryRepliesByStoryId({});
+      return;
+    }
+
+    const [reactionsResult, repliesResult] = await Promise.all([
+      supabase
+        .from('story_reactions')
+        .select('id,story_id,user_id,reaction,created_at')
+        .in('story_id', uniqueStoryIds)
+        .order('created_at', { ascending: true }),
+      supabase
+        .from('story_replies')
+        .select('id,story_id,user_id,content,created_at')
+        .in('story_id', uniqueStoryIds)
+        .order('created_at', { ascending: true }),
+    ]);
+
+    if (reactionsResult.error || repliesResult.error) {
+      console.error('[ChatList] Failed to load story interactions', reactionsResult.error || repliesResult.error);
+      return;
+    }
+
+    const reactionRows = reactionsResult.data || [];
+    const replyRows = repliesResult.data || [];
+    const userIds = Array.from(new Set([
+      ...reactionRows.map((item) => item.user_id),
+      ...replyRows.map((item) => item.user_id),
+    ]));
+
+    let nameMap = new Map<string, string>();
+    if (userIds.length > 0) {
+      const { data: profileRows } = await supabase
+        .from('profiles')
+        .select('id,display_name,username')
+        .in('id', userIds);
+      nameMap = new Map(
+        ((profileRows || []) as Pick<Profile, 'id' | 'display_name' | 'username'>[])
+          .map((profileRow) => [
+            profileRow.id,
+            profileRow.display_name?.trim() || profileRow.username || 'User',
+          ])
+      );
+    }
+
+    const nextReactionMap: Record<string, StoryReactionView[]> = {};
+    const nextReplyMap: Record<string, StoryReplyView[]> = {};
+
+    for (const reactionRow of reactionRows) {
+      if (!nextReactionMap[reactionRow.story_id]) nextReactionMap[reactionRow.story_id] = [];
+      nextReactionMap[reactionRow.story_id].push({
+        ...reactionRow,
+        author_name: nameMap.get(reactionRow.user_id) || 'User',
+      });
+    }
+
+    for (const replyRow of replyRows) {
+      if (!nextReplyMap[replyRow.story_id]) nextReplyMap[replyRow.story_id] = [];
+      nextReplyMap[replyRow.story_id].push({
+        ...replyRow,
+        author_name: nameMap.get(replyRow.user_id) || 'User',
+      });
+    }
+
+    setStoryReactionsByStoryId(nextReactionMap);
+    setStoryRepliesByStoryId(nextReplyMap);
+  }, []);
+
+  const handleReactStory = useCallback(async (storyId: string, reaction: string) => {
     if (!user) return;
-    const targetUserIds = Array.from(
-      new Set([
-        ...conversations.map((conv) => conv.other_user.id),
-        user.id,
-      ])
-    );
-    await fetchActiveStories(targetUserIds);
-  }, [conversations, fetchActiveStories, user]);
+    const { data, error } = await supabase
+      .from('story_reactions')
+      .upsert({
+        story_id: storyId,
+        user_id: user.id,
+        reaction,
+      }, { onConflict: 'story_id,user_id' })
+      .select('id,story_id,user_id,reaction,created_at')
+      .single();
+    if (error) {
+      presentToast({ message: 'Failed to react to story.', color: 'danger', duration: 1600, position: 'top' });
+      return;
+    }
+    if (data) {
+      const nextReaction: StoryReactionView = {
+        ...data,
+        author_name: currentUserDisplayName,
+      };
+      setStoryReactionsByStoryId((prev) => {
+        const current = prev[storyId] || [];
+        const withoutMine = current.filter((item) => item.user_id !== user.id);
+        return {
+          ...prev,
+          [storyId]: [...withoutMine, nextReaction].sort((a, b) => (
+            new Date(a.created_at).getTime() - new Date(b.created_at).getTime()
+          )),
+        };
+      });
+    }
+  }, [currentUserDisplayName, presentToast, user]);
+
+  const getOrCreateConversationWithUser = useCallback(async (otherUserId: string): Promise<string | null> => {
+    if (!user) return null;
+
+    const existingFromList = conversations.find((conv) => conv.other_user.id === otherUserId);
+    if (existingFromList) {
+      return existingFromList.id;
+    }
+
+    const [{ data: myConvos, error: myConvosError }, { data: theirConvos, error: theirConvosError }] = await Promise.all([
+      supabase
+        .from('conversation_participants')
+        .select('conversation_id')
+        .eq('user_id', user.id),
+      supabase
+        .from('conversation_participants')
+        .select('conversation_id')
+        .eq('user_id', otherUserId),
+    ]);
+
+    if (myConvosError || theirConvosError) {
+      return null;
+    }
+
+    const myIds = new Set((myConvos || []).map((item) => item.conversation_id));
+    const existingId = (theirConvos || []).find((item) => myIds.has(item.conversation_id))?.conversation_id;
+    if (existingId) {
+      return existingId;
+    }
+
+    const conversationId = crypto.randomUUID();
+    const { error: createConversationError } = await supabase
+      .from('conversations')
+      .insert({ id: conversationId });
+
+    if (createConversationError) {
+      return null;
+    }
+
+    const { error: participantsError } = await supabase
+      .from('conversation_participants')
+      .insert([
+        { conversation_id: conversationId, user_id: user.id },
+        { conversation_id: conversationId, user_id: otherUserId },
+      ]);
+
+    if (participantsError) {
+      await supabase.from('conversations').delete().eq('id', conversationId);
+      return null;
+    }
+
+    return conversationId;
+  }, [conversations, user]);
+
+  const handleReplyStory = useCallback(async (storyId: string, replyText: string) => {
+    if (!user) return;
+    const text = replyText.trim();
+    if (!text) return;
+
+    const { data: replyRow, error } = await supabase
+      .from('story_replies')
+      .insert({
+        story_id: storyId,
+        user_id: user.id,
+        content: text,
+      })
+      .select('id,story_id,user_id,content,created_at')
+      .single();
+
+    if (error) {
+      presentToast({ message: 'Failed to send reply.', color: 'danger', duration: 1600, position: 'top' });
+      return;
+    }
+
+    const { data: storyRow, error: storyError } = await supabase
+      .from('stories')
+      .select('id,user_id,media_url,media_path,media_type,caption')
+      .eq('id', storyId)
+      .maybeSingle();
+
+    if (storyError || !storyRow) {
+      presentToast({ message: 'Reply saved, but story reference was not found.', color: 'warning', duration: 1800, position: 'top' });
+      if (replyRow) {
+        const localReply: StoryReplyView = {
+          ...replyRow,
+          author_name: currentUserDisplayName,
+        };
+        setStoryRepliesByStoryId((prev) => ({
+          ...prev,
+          [storyId]: [...(prev[storyId] || []), localReply],
+        }));
+      }
+      return;
+    }
+
+    const storyOwnerId = storyRow.user_id;
+
+    let deliveredToChat = false;
+    if (storyOwnerId && storyOwnerId !== user.id) {
+      const conversationId = await getOrCreateConversationWithUser(storyOwnerId);
+      if (conversationId) {
+        const { data: messageRow, error: messageError } = await supabase
+          .from('messages')
+          .insert({
+            conversation_id: conversationId,
+            sender_id: user.id,
+            content: text,
+            message_type: storyRow.media_type,
+            media_url: storyRow.media_url,
+            media_path: storyRow.media_path,
+            media_name: 'Story reply',
+          })
+          .select('id')
+          .single();
+
+        if (!messageError && messageRow?.id) {
+          deliveredToChat = true;
+          try {
+            await sendChatPush(messageRow.id);
+          } catch {
+            // keep non-blocking; message already exists in chat
+          }
+        }
+      }
+    }
+
+    presentToast({
+      message: deliveredToChat ? 'Reply sent.' : 'Reply saved. Chat delivery pending.',
+      color: deliveredToChat ? 'success' : 'warning',
+      duration: 1600,
+      position: 'top',
+    });
+    if (replyRow) {
+      const localReply: StoryReplyView = {
+        ...replyRow,
+        author_name: currentUserDisplayName,
+      };
+      setStoryRepliesByStoryId((prev) => ({
+        ...prev,
+        [storyId]: [...(prev[storyId] || []), localReply],
+      }));
+    }
+  }, [currentUserDisplayName, getOrCreateConversationWithUser, presentToast, user]);
 
   const cleanupExpiredOwnStories = useCallback(async () => {
     if (!user) return;
@@ -286,26 +586,28 @@ const ChatList: React.FC = () => {
 
       const { data: urlData } = supabase.storage.from('stories').getPublicUrl(filePath);
 
-      const { error: insertError } = await supabase.from('stories').insert({
+      const { data: insertedStory, error: insertError } = await supabase.from('stories').insert({
         user_id: user.id,
         media_url: urlData.publicUrl,
         media_path: filePath,
         media_type: mediaType,
         expires_at: new Date(Date.now() + (24 * 60 * 60 * 1000)).toISOString(),
-      });
+      }).select('id,user_id,media_url,media_path,media_type,caption,created_at,expires_at').single();
 
       if (insertError) {
         presentToast({ message: 'Failed to save story.', color: 'danger', duration: 2200, position: 'top' });
       } else {
+        if (insertedStory) {
+          upsertStoryLocal(insertedStory as ActiveStory);
+        }
         presentToast({ message: 'Story uploaded!', color: 'success', duration: 1500, position: 'top' });
-        await refreshStoriesForListUsers();
       }
     } catch {
       presentToast({ message: 'Something went wrong.', color: 'danger', duration: 2200, position: 'top' });
     } finally {
       setUploadingStory(false);
     }
-  }, [presentToast, refreshStoriesForListUsers, user]);
+  }, [presentToast, upsertStoryLocal, user]);
 
   const fetchConversations = useCallback(async (reset = false) => {
     if (!user) return;
@@ -445,12 +747,24 @@ const ChatList: React.FC = () => {
       .on(
         'postgres_changes',
         { event: '*', schema: 'public', table: 'stories' },
-        async (payload) => {
+        (payload) => {
           const changedUserId =
             (payload.new as { user_id?: string } | null)?.user_id
             ?? (payload.old as { user_id?: string } | null)?.user_id;
           if (!changedUserId || !relevantUserIds.has(changedUserId)) return;
-          await refreshStoriesForListUsers();
+
+          if (payload.eventType === 'DELETE') {
+            const oldStory = payload.old as { id?: string; user_id?: string } | null;
+            if (oldStory?.id && oldStory?.user_id) {
+              removeStoryLocal(oldStory.id, oldStory.user_id);
+            }
+            return;
+          }
+
+          const nextStory = payload.new as ActiveStory | null;
+          if (nextStory) {
+            upsertStoryLocal(nextStory);
+          }
         }
       )
       .subscribe();
@@ -458,7 +772,7 @@ const ChatList: React.FC = () => {
     return () => {
       supabase.removeChannel(channel);
     };
-  }, [conversations, refreshStoriesForListUsers, user]);
+  }, [conversations, removeStoryLocal, upsertStoryLocal, user]);
 
   useEffect(() => {
     if (!storyViewerContext) return;
@@ -466,6 +780,40 @@ const ChatList: React.FC = () => {
       setStoryViewerContext(null);
     }
   }, [storyViewerContext, viewerStories.length]);
+
+  useEffect(() => {
+    if (!storyViewerContext || viewerStories.length === 0) return;
+    void loadStoryInteractions(viewerStories.map((story) => story.id));
+  }, [loadStoryInteractions, storyViewerContext, viewerStories]);
+
+  useEffect(() => {
+    if (!storyViewerContext || viewerStories.length === 0) return;
+
+    const currentStoryIds = new Set(viewerStories.map((story) => story.id));
+    const refreshIfRelevant = async (payload: { new?: { story_id?: string } | null; old?: { story_id?: string } | null }) => {
+      const storyId = payload.new?.story_id ?? payload.old?.story_id;
+      if (!storyId || !currentStoryIds.has(storyId)) return;
+      await loadStoryInteractions(Array.from(currentStoryIds));
+    };
+
+    const channel = supabase
+      .channel(`story-interactions-${storyViewerContext.userId}`)
+      .on(
+        'postgres_changes',
+        { event: '*', schema: 'public', table: 'story_reactions' },
+        (payload) => { void refreshIfRelevant(payload); }
+      )
+      .on(
+        'postgres_changes',
+        { event: '*', schema: 'public', table: 'story_replies' },
+        (payload) => { void refreshIfRelevant(payload); }
+      )
+      .subscribe();
+
+    return () => {
+      supabase.removeChannel(channel);
+    };
+  }, [loadStoryInteractions, storyViewerContext, viewerStories]);
 
   return (
     <IonPage>
@@ -718,6 +1066,11 @@ const ChatList: React.FC = () => {
             ownerName={storyViewerContext.displayName}
             ownerAvatarUrl={storyViewerContext.avatarUrl}
             canDelete={storyViewerContext.isOwn}
+            canInteract={!storyViewerContext.isOwn}
+            reactionsByStoryId={storyReactionsByStoryId}
+            repliesByStoryId={storyRepliesByStoryId}
+            onReactStory={handleReactStory}
+            onReplyStory={handleReplyStory}
             onDeleteStory={handleDeleteStory}
             onClose={() => setStoryViewerContext(null)}
           />
