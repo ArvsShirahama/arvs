@@ -179,7 +179,10 @@ export function useVideoCall(conversationId: string, localUserId: string | undef
           }
 
           if (pcState === 'connecting' || iceState === 'checking' || iceState === 'new') {
-            if (callStatusRef.current === 'calling' || callStatusRef.current === 'ringing' || callStatusRef.current === 'active') {
+            // Do NOT downgrade 'active' to 'connecting' — ICE state events can
+            // fire out of order on mobile, and this would make the UI stuck at
+            // "connecting" even though the WebRTC connection is already established.
+            if (callStatusRef.current === 'calling' || callStatusRef.current === 'ringing') {
               setCallStatus('connecting');
             }
             break;

@@ -80,7 +80,7 @@ let signalingChannel: ReturnType<typeof supabase.channel> | null = null;
 let channelReadyPromise: Promise<void> | null = null;
 
 let isRemoteDescriptionSet = false;
-let pendingIceCandidates: RTCIceCandidateInit[] = [];
+const pendingIceCandidatesByCallId = new Map<string, RTCIceCandidateInit[]>();
 let signalListeners: SignalCallback[] = [];
 let currentConversationId: string | null = null;
 let currentLocalUserId: string | null = null;
@@ -249,7 +249,6 @@ function createPeerConnection(
 
   clearDisconnectedTimer();
   isRemoteDescriptionSet = false;
-  pendingIceCandidates = [];
   remoteStream = new MediaStream();
 
   const pc = new RTCPeerConnection(getRtcConfig());
@@ -325,23 +324,23 @@ function createPeerConnection(
 }
 
 async function flushPendingCandidates(): Promise<void> {
-  if (!peerConnection || !isRemoteDescriptionSet) return;
+  if (!peerConnection || !isRemoteDescriptionSet || !currentCallId) return;
 
-  for (const candidate of pendingIceCandidates) {
+  const candidates = pendingIceCandidatesByCallId.get(currentCallId) || [];
+  for (const candidate of candidates) {
     try {
       await peerConnection.addIceCandidate(new RTCIceCandidate(candidate));
     } catch (err) {
       console.warn('[Call] Failed to add buffered ICE candidate:', err);
     }
   }
-  pendingIceCandidates = [];
+  pendingIceCandidatesByCallId.delete(currentCallId);
 }
 
 async function handleIncomingSignal(signal: SignalPayload): Promise<void> {
-  if (!currentCallId || signal.callId !== currentCallId) return;
-
   switch (signal.type) {
     case 'answer': {
+      if (!currentCallId || signal.callId !== currentCallId) return;
       if (!peerConnection || !signal.sdp) return;
       try {
         await peerConnection.setRemoteDescription(
@@ -355,15 +354,20 @@ async function handleIncomingSignal(signal: SignalPayload): Promise<void> {
       break;
     }
     case 'ice-candidate': {
-      if (!signal.candidate) return;
-      if (!peerConnection || !isRemoteDescriptionSet) {
-        pendingIceCandidates.push(signal.candidate);
-        return;
-      }
-      try {
-        await peerConnection.addIceCandidate(new RTCIceCandidate(signal.candidate));
-      } catch (err) {
-        console.warn('[Call] Failed to add ICE candidate:', err);
+      if (!signal.candidate || !signal.callId) return;
+      if (peerConnection && isRemoteDescriptionSet && signal.callId === currentCallId) {
+        try {
+          await peerConnection.addIceCandidate(new RTCIceCandidate(signal.candidate));
+        } catch (err) {
+          console.warn('[Call] Failed to add ICE candidate:', err);
+        }
+      } else {
+        let list = pendingIceCandidatesByCallId.get(signal.callId);
+        if (!list) {
+          list = [];
+          pendingIceCandidatesByCallId.set(signal.callId, list);
+        }
+        list.push(signal.candidate);
       }
       break;
     }
@@ -380,11 +384,15 @@ export async function startCall(
   await ensureSignalingChannel(conversationId, localUserId);
 
   const callId = crypto.randomUUID();
-  currentCallId = callId;
   currentRemoteUserId = remoteUserId;
 
   const stream = await acquireLocalMedia();
+
+  // Set currentCallId AFTER createPeerConnection to avoid the race where
+  // handleIncomingSignal buffers candidates into pendingIceCandidates which
+  // createPeerConnection then wipes.
   const pc = createPeerConnection(conversationId, localUserId, remoteUserId, callId);
+  currentCallId = callId;
 
   const offer = await pc.createOffer({
     offerToReceiveAudio: true,
@@ -433,6 +441,7 @@ export async function acceptCall(
   }
 
   const pc = createPeerConnection(conversationId, localUserId, remoteUserId, callId);
+
   await pc.setRemoteDescription(new RTCSessionDescription({ type: 'offer', sdp: offerSdp }));
   isRemoteDescriptionSet = true;
   await flushPendingCandidates();
@@ -548,7 +557,7 @@ export function cleanupCall(): void {
   }
 
   isRemoteDescriptionSet = false;
-  pendingIceCandidates = [];
+  pendingIceCandidatesByCallId.clear();
   currentCallId = null;
   currentRemoteUserId = null;
 }
@@ -576,7 +585,7 @@ export function getCallDebugInfo(): Record<string, unknown> {
     hasRemoteStream: !!remoteStream,
     remoteTracks: remoteStream?.getTracks().map((t) => `${t.kind}:${t.enabled}`) ?? [],
     remoteDescSet: isRemoteDescriptionSet,
-    pendingCandidates: pendingIceCandidates.length,
+    pendingCandidates: currentCallId ? (pendingIceCandidatesByCallId.get(currentCallId)?.length ?? 0) : 0,
     conversationId: currentConversationId,
     callId: currentCallId,
     remoteUserId: currentRemoteUserId,
