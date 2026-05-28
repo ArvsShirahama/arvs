@@ -1,6 +1,8 @@
 import { supabase } from '../../../supabaseClient';
 import type {
   ConversationBackgroundType,
+  ConversationNickname,
+  ConversationParticipantProfile,
   ConversationPreference,
   Message,
   MessageType,
@@ -13,6 +15,9 @@ const CONVERSATION_BACKGROUND_BUCKET = 'conversation-backgrounds';
 export interface ConversationContext {
   otherUser: Profile | null;
   preference: ConversationPreference | null;
+  participants: ConversationParticipantProfile[];
+  nicknames: Record<string, string | null>;
+  otherUserNickname: string | null;
 }
 
 export interface ConversationPreferencePatch {
@@ -23,15 +28,84 @@ export interface ConversationPreferencePatch {
   background_image_path?: string | null;
 }
 
+export type ConversationAppearancePatch = Required<
+  Pick<
+    ConversationPreferencePatch,
+    'theme_id' | 'background_type' | 'background_image_url' | 'background_image_path'
+  >
+>;
+
 export interface ConversationMediaPageOptions {
   beforeCreatedAt?: string | null;
   limit?: number;
   type?: 'all' | 'image' | 'video' | 'file';
 }
 
+function createEmptyPreference(conversationId: string, userId: string): ConversationPreference {
+  const now = new Date().toISOString();
+  return {
+    conversation_id: conversationId,
+    user_id: userId,
+    peer_nickname: null,
+    theme_id: 'system',
+    background_type: 'gradient',
+    background_image_url: null,
+    background_image_path: null,
+    created_at: now,
+    updated_at: now,
+  };
+}
+
 function createFilePath(userId: string, conversationId: string, fileName: string): string {
   const safeName = fileName.toLowerCase().replace(/[^a-z0-9._-]+/g, '-');
   return `${userId}/${conversationId}/${Date.now()}-${safeName}`;
+}
+
+function mergeNicknameWithSharedAppearance(
+  ownPreference: ConversationPreference | null,
+  sharedPreference: ConversationPreference | null,
+  conversationId: string,
+  userId: string,
+  legacyPeerNickname: string | null = null
+): ConversationPreference | null {
+  if (!ownPreference && !sharedPreference) {
+    return legacyPeerNickname ? {
+      ...createEmptyPreference(conversationId, userId),
+      peer_nickname: legacyPeerNickname,
+    } : null;
+  }
+
+  const source = ownPreference ?? sharedPreference!;
+  return {
+    ...source,
+    conversation_id: conversationId,
+    user_id: userId,
+    peer_nickname: legacyPeerNickname ?? ownPreference?.peer_nickname ?? null,
+    theme_id: sharedPreference?.theme_id ?? ownPreference?.theme_id ?? 'system',
+    background_type: sharedPreference?.background_type ?? ownPreference?.background_type ?? 'gradient',
+    background_image_url: sharedPreference?.background_image_url ?? ownPreference?.background_image_url ?? null,
+    background_image_path: sharedPreference?.background_image_path ?? ownPreference?.background_image_path ?? null,
+  };
+}
+
+function mapNicknames(rows: ConversationNickname[] | null): Record<string, string | null> {
+  return (rows ?? []).reduce<Record<string, string | null>>((acc, row) => {
+    acc[row.user_id] = row.nickname;
+    return acc;
+  }, {});
+}
+
+async function getConversationParticipantIds(conversationId: string): Promise<string[]> {
+  const { data, error } = await supabase
+    .from('conversation_participants')
+    .select('user_id')
+    .eq('conversation_id', conversationId);
+
+  if (error) {
+    throw error;
+  }
+
+  return data?.map((row) => row.user_id) ?? [];
 }
 
 export async function getConversationPreference(
@@ -56,38 +130,115 @@ export async function getConversationContext(
   conversationId: string,
   currentUserId: string
 ): Promise<ConversationContext> {
-  const [{ data: participants, error: participantsError }, preference] = await Promise.all([
+  const [
+    { data: participants, error: participantsError },
+    { data: preferences, error: preferencesError },
+    { data: nicknameRows, error: nicknamesError },
+  ] = await Promise.all([
     supabase
       .from('conversation_participants')
       .select('user_id')
-      .eq('conversation_id', conversationId)
-      .neq('user_id', currentUserId),
-    getConversationPreference(conversationId, currentUserId),
+      .eq('conversation_id', conversationId),
+    supabase
+      .from('conversation_preferences')
+      .select('*')
+      .eq('conversation_id', conversationId),
+    supabase
+      .from('conversation_nicknames')
+      .select('*')
+      .eq('conversation_id', conversationId),
   ]);
 
   if (participantsError) {
     throw participantsError;
   }
+  if (preferencesError) {
+    throw preferencesError;
+  }
+  // Gracefully handle missing conversation_nicknames table
+  if (nicknamesError) {
+    console.warn('conversation_nicknames query failed (table may not exist yet):', nicknamesError.message);
+  }
 
-  const otherUserId = participants?.[0]?.user_id;
+  const preferenceRows = (preferences as ConversationPreference[] | null) ?? [];
+  const nicknameMap = mapNicknames(nicknameRows as ConversationNickname[] | null);
+  const ownPreference = preferenceRows.find((row) => row.user_id === currentUserId) ?? null;
+  const sharedAppearancePreference =
+    preferenceRows.find((row) => row.background_image_url || row.background_image_path) ?? ownPreference ?? preferenceRows[0] ?? null;
+  const otherUserId = participants?.find((participant) => participant.user_id !== currentUserId)?.user_id;
+  const legacyPeerNickname = otherUserId ? (nicknameMap[otherUserId] ?? ownPreference?.peer_nickname ?? null) : null;
+  const preference = mergeNicknameWithSharedAppearance(
+    ownPreference,
+    sharedAppearancePreference,
+    conversationId,
+    currentUserId,
+    legacyPeerNickname
+  );
+
+  const participantIds = participants?.map((participant) => participant.user_id) ?? [];
+  const { data: profiles, error: profilesError } = participantIds.length > 0
+    ? await supabase.from('profiles').select('*').in('id', participantIds)
+    : { data: [], error: null };
+
+  if (profilesError) {
+    throw profilesError;
+  }
+
+  const participantProfiles = ((profiles as Profile[] | null) ?? []).map((participantProfile) => ({
+    profile: participantProfile,
+    nickname: nicknameMap[participantProfile.id] ?? null,
+  }));
+
   if (!otherUserId) {
-    return { otherUser: null, preference };
+    return {
+      otherUser: null,
+      preference,
+      participants: participantProfiles,
+      nicknames: nicknameMap,
+      otherUserNickname: null,
+    };
   }
 
-  const { data: profile, error: profileError } = await supabase
-    .from('profiles')
-    .select('*')
-    .eq('id', otherUserId)
-    .single();
-
-  if (profileError) {
-    throw profileError;
-  }
+  const profile = participantProfiles.find((participant) => participant.profile.id === otherUserId)?.profile ?? null;
 
   return {
-    otherUser: (profile as Profile | null) ?? null,
+    otherUser: profile,
     preference,
+    participants: participantProfiles,
+    nicknames: nicknameMap,
+    otherUserNickname: nicknameMap[otherUserId] ?? legacyPeerNickname,
   };
+}
+
+export async function getConversationNicknames(conversationId: string): Promise<Record<string, string | null>> {
+  const { data, error } = await supabase
+    .from('conversation_nicknames')
+    .select('*')
+    .eq('conversation_id', conversationId);
+
+  if (error) {
+    throw error;
+  }
+
+  return mapNicknames(data as ConversationNickname[] | null);
+}
+
+export async function saveConversationParticipantNickname(
+  conversationId: string,
+  participantUserId: string,
+  nickname: string | null
+): Promise<ConversationNickname> {
+  const { data, error } = await supabase.rpc('save_conversation_participant_nickname', {
+    p_conversation_id: conversationId,
+    p_user_id: participantUserId,
+    p_nickname: nickname?.trim() || null,
+  });
+
+  if (error) {
+    throw error;
+  }
+
+  return data as ConversationNickname;
 }
 
 export async function saveConversationPreference(
@@ -113,6 +264,71 @@ export async function saveConversationPreference(
   }
 
   return data as ConversationPreference;
+}
+
+export async function saveSharedConversationAppearance(
+  conversationId: string,
+  currentUserId: string,
+  patch: ConversationAppearancePatch
+): Promise<ConversationPreference> {
+  const { data: rpcData, error: rpcError } = await supabase.rpc('save_shared_conversation_appearance', {
+    p_conversation_id: conversationId,
+    p_theme_id: patch.theme_id,
+    p_background_type: patch.background_type,
+    p_background_image_url: patch.background_image_url,
+    p_background_image_path: patch.background_image_path,
+  });
+
+  if (!rpcError && rpcData) {
+    return rpcData as ConversationPreference;
+  }
+
+  const [participantIds, { data: preferences, error: preferencesError }] = await Promise.all([
+    getConversationParticipantIds(conversationId),
+    supabase
+      .from('conversation_preferences')
+      .select('*')
+      .eq('conversation_id', conversationId),
+  ]);
+
+  if (preferencesError) {
+    throw preferencesError;
+  }
+  if (!participantIds.includes(currentUserId)) {
+    throw new Error('You are not a participant in this conversation.');
+  }
+
+  const existingPreferences = ((preferences as ConversationPreference[] | null) ?? [])
+    .reduce<Record<string, ConversationPreference>>((acc, preference) => {
+      acc[preference.user_id] = preference;
+      return acc;
+    }, {});
+
+  const updatedAt = new Date().toISOString();
+  const payload = participantIds.map((participantId) => ({
+    conversation_id: conversationId,
+    user_id: participantId,
+    peer_nickname: existingPreferences[participantId]?.peer_nickname ?? null,
+    updated_at: updatedAt,
+    ...patch,
+  }));
+
+  const { data, error } = await supabase
+    .from('conversation_preferences')
+    .upsert(payload, { onConflict: 'conversation_id,user_id' })
+    .select('*');
+
+  if (error) {
+    throw error;
+  }
+
+  const rows = (data as ConversationPreference[] | null) ?? [];
+  const currentUserPreference = rows.find((row) => row.user_id === currentUserId) ?? rows[0];
+  if (!currentUserPreference) {
+    throw new Error('Unable to save conversation appearance.');
+  }
+
+  return currentUserPreference;
 }
 
 export async function deleteConversationBackgroundAsset(path: string | null): Promise<void> {

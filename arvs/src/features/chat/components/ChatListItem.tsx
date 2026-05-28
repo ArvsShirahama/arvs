@@ -1,6 +1,7 @@
 import { IonItem, IonLabel, IonNote } from '@ionic/react';
 import type { ConversationWithDetails } from '../../../types/database';
 import Avatar from '../../../components/Avatar';
+import { getDisplayNameForParticipant } from '../services';
 import './ChatListItem.css';
 
 interface ChatListItemProps {
@@ -41,7 +42,10 @@ export default function ChatListItem({
 }: ChatListItemProps) {
   const { other_user, last_message, unread_count } = conversation;
   const isOwnMessage = last_message?.sender_id === currentUserId;
-  const displayName = conversation.preference?.peer_nickname?.trim() || other_user.display_name || other_user.username;
+  const displayName = getDisplayNameForParticipant(
+    other_user,
+    conversation.other_user_nickname ?? conversation.nicknames?.[other_user.id] ?? conversation.preference?.peer_nickname
+  );
 
   const getPreview = () => {
     if (!last_message) return 'No messages yet';

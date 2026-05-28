@@ -6,8 +6,6 @@ import {
   IonContent,
   IonHeader,
   IonInput,
-  IonItem,
-  IonLabel,
   IonPage,
   IonSpinner,
   IonText,
@@ -19,23 +17,26 @@ import {
 } from '@ionic/react';
 import { Camera } from '@capacitor/camera';
 import { Capacitor } from '@capacitor/core';
-import { imageOutline, imagesOutline, phonePortraitOutline, trashOutline } from 'ionicons/icons';
+import { imageOutline, imagesOutline, trashOutline } from 'ionicons/icons';
 import { IonIcon } from '@ionic/react';
 import { useParams } from 'react-router-dom';
 import Avatar from '../../../components/Avatar';
 import { useAuth } from '../../auth/hooks';
+import { supabase } from '../../../supabaseClient';
 import {
   deleteConversationBackgroundAsset,
   getConversationContext,
-  saveConversationPreference,
+  saveConversationParticipantNickname,
+  saveSharedConversationAppearance,
   uploadConversationBackgroundWithProgress,
 } from '../services';
 import {
   DEFAULT_CONVERSATION_THEME_ID,
-  getConversationDisplayName,
+  getDisplayNameForParticipant,
   getConversationTheme,
 } from '../services';
-import type { ConversationPreference, Profile } from '../../../types/database';
+import type { ConversationParticipantProfile, ConversationPreference, Profile } from '../../../types/database';
+import type { ConversationNickname } from '../../../types/database';
 import { validateImageFile, compressAndResizeImage } from '../../../utils/imageProcessor';
 import ImageCropperModal from '../../../components/ImageCropperModal';
 import './ConversationSettings.css';
@@ -61,7 +62,9 @@ export default function ConversationSettings() {
   const [saving, setSaving] = useState(false);
   const [otherUser, setOtherUser] = useState<Profile | null>(null);
   const [preference, setPreference] = useState<ConversationPreference | null>(null);
-  const [nickname, setNickname] = useState('');
+  const [participants, setParticipants] = useState<ConversationParticipantProfile[]>([]);
+  const [participantNicknames, setParticipantNicknames] = useState<Record<string, string>>({});
+  const [savedParticipantNicknames, setSavedParticipantNicknames] = useState<Record<string, string>>({});
   const [backgroundSelection, setBackgroundSelection] = useState<BackgroundSelection | null>(null);
   const [removeBackground, setRemoveBackground] = useState(false);
   const [showCropper, setShowCropper] = useState(false);
@@ -81,7 +84,13 @@ export default function ConversationSettings() {
       const context = await getConversationContext(conversationId, user.id);
       setOtherUser(context.otherUser);
       setPreference(context.preference);
-      setNickname(context.preference?.peer_nickname ?? '');
+      setParticipants(context.participants);
+      const nextNicknames = context.participants.reduce<Record<string, string>>((acc, participant) => {
+        acc[participant.profile.id] = participant.nickname ?? '';
+        return acc;
+      }, {});
+      setParticipantNicknames(nextNicknames);
+      setSavedParticipantNicknames(nextNicknames);
       setRemoveBackground(false);
     } catch {
       await presentToast({
@@ -100,6 +109,35 @@ export default function ConversationSettings() {
   }, [loadSettings]);
 
   useEffect(() => {
+    if (!conversationId) return;
+
+    const channel = supabase
+      .channel(`conversation-settings-${conversationId}`)
+      .on(
+        'postgres_changes',
+        {
+          event: '*',
+          schema: 'public',
+          table: 'conversation_nicknames',
+          filter: `conversation_id=eq.${conversationId}`,
+        },
+        (payload) => {
+          const row = (payload.new || payload.old) as ConversationNickname | undefined;
+          if (!row) return;
+
+          const nextValue = payload.eventType === 'DELETE' ? '' : ((payload.new as ConversationNickname).nickname ?? '');
+          setParticipantNicknames((current) => ({ ...current, [row.user_id]: nextValue }));
+          setSavedParticipantNicknames((current) => ({ ...current, [row.user_id]: nextValue }));
+        }
+      )
+      .subscribe();
+
+    return () => {
+      void supabase.removeChannel(channel);
+    };
+  }, [conversationId]);
+
+  useEffect(() => {
     return () => {
       if (backgroundSelection?.previewUrl.startsWith('blob:')) {
         URL.revokeObjectURL(backgroundSelection.previewUrl);
@@ -107,9 +145,10 @@ export default function ConversationSettings() {
     };
   }, [backgroundSelection]);
 
+  const otherUserNickname = otherUser ? participantNicknames[otherUser.id] ?? null : null;
   const previewName = useMemo(
-    () => nickname.trim() || getConversationDisplayName(otherUser, preference),
-    [nickname, otherUser, preference]
+    () => getDisplayNameForParticipant(otherUser, otherUserNickname ?? preference?.peer_nickname),
+    [otherUser, otherUserNickname, preference?.peer_nickname]
   );
 
   const systemTheme = useMemo(() => getConversationTheme(preference?.theme_id), [preference?.theme_id]);
@@ -184,6 +223,13 @@ export default function ConversationSettings() {
     setBackgroundSelection(null);
   };
 
+  const updateParticipantNickname = (participantId: string, value: string) => {
+    setParticipantNicknames((current) => ({
+      ...current,
+      [participantId]: value,
+    }));
+  };
+
   const handleCropConfirm = async (croppedBlob: Blob) => {
     setShowCropper(false);
     if (pendingImageSrc?.startsWith('blob:')) {
@@ -238,15 +284,53 @@ export default function ConversationSettings() {
         setIsUploading(false);
       }
 
-      const nextPreference = await saveConversationPreference(conversationId, user.id, {
-        peer_nickname: nickname.trim() || null,
-        theme_id: DEFAULT_CONVERSATION_THEME_ID,
+      const changedNicknameEntries = Object.entries(participantNicknames)
+        .filter(([participantId, value]) => (value.trim() || '') !== (savedParticipantNicknames[participantId]?.trim() || ''));
+
+      const savedNicknameRows = await Promise.all(
+        changedNicknameEntries.map(([participantId, value]) =>
+          saveConversationParticipantNickname(conversationId, participantId, value.trim() || null)
+        )
+      );
+
+      const nextPreference = backgroundSelection || removeBackground
+        ? await saveSharedConversationAppearance(conversationId, user.id, {
+          theme_id: DEFAULT_CONVERSATION_THEME_ID,
+          background_type: backgroundImageUrl ? 'image' : 'gradient',
+          background_image_url: backgroundImageUrl,
+          background_image_path: backgroundImagePath,
+        })
+        : {
+          ...(preference ?? {
+            conversation_id: conversationId,
+            user_id: user.id,
+            created_at: new Date().toISOString(),
+          }),
+          theme_id: DEFAULT_CONVERSATION_THEME_ID,
+          background_type: backgroundImageUrl ? 'image' as const : 'gradient' as const,
+          background_image_url: backgroundImageUrl,
+          background_image_path: backgroundImagePath,
+          updated_at: new Date().toISOString(),
+          peer_nickname: otherUser ? participantNicknames[otherUser.id]?.trim() || null : null,
+        };
+
+      const nextSavedNicknames = { ...savedParticipantNicknames };
+      for (const row of savedNicknameRows) {
+        nextSavedNicknames[row.user_id] = row.nickname ?? '';
+      }
+      setSavedParticipantNicknames(nextSavedNicknames);
+      setParticipantNicknames((current) => ({
+        ...current,
+        ...nextSavedNicknames,
+      }));
+
+      setPreference({
+        ...nextPreference,
+        peer_nickname: otherUser ? nextSavedNicknames[otherUser.id]?.trim() || null : null,
         background_type: backgroundImageUrl ? 'image' : 'gradient',
         background_image_url: backgroundImageUrl,
         background_image_path: backgroundImagePath,
       });
-
-      setPreference(nextPreference);
       setRemoveBackground(false);
       if (backgroundSelection?.previewUrl.startsWith('blob:')) {
         URL.revokeObjectURL(backgroundSelection.previewUrl);
@@ -267,6 +351,7 @@ export default function ConversationSettings() {
         position: 'top',
       });
     } finally {
+      setIsUploading(false);
       setSaving(false);
     }
   };
@@ -301,45 +386,46 @@ export default function ConversationSettings() {
               </div>
             </section>
 
-            <section className="conversation-settings-section">
-              <h2>Nickname</h2>
-              <IonItem lines="none" className="conversation-settings-input-item">
-                <IonLabel position="stacked">Name shown in this conversation</IonLabel>
-                <IonInput
-                  value={nickname}
-                  maxlength={30}
-                  placeholder={otherUser?.display_name || otherUser?.username || 'Set a nickname'}
-                  onIonInput={(event) => setNickname(event.detail.value ?? '')}
-                />
-              </IonItem>
+            <section className="conversation-settings-section conversation-people-section">
+              <h2>People</h2>
+              <div className="conversation-people-list">
+                {participants.map((participant) => {
+                  const participantProfile = participant.profile;
+                  const currentNickname = participantNicknames[participantProfile.id] ?? '';
+                  const displayName = getDisplayNameForParticipant(participantProfile, currentNickname);
+                  const isCurrentUser = participantProfile.id === user?.id;
+
+                  return (
+                    <div className="conversation-person-row" key={participantProfile.id}>
+                      <Avatar
+                        src={participantProfile.avatar_url}
+                        name={displayName}
+                        size="small"
+                      />
+                      <div className="conversation-person-copy">
+                        <strong>{displayName}</strong>
+                        <span>@{participantProfile.username}{isCurrentUser ? ' · You' : ''}</span>
+                      </div>
+                      <IonInput
+                        className="conversation-person-nickname"
+                        value={currentNickname}
+                        maxlength={30}
+                        placeholder="Nickname"
+                        aria-label={`Nickname for ${participantProfile.username}`}
+                        onIonInput={(event) => updateParticipantNickname(participantProfile.id, event.detail.value ?? '')}
+                      />
+                    </div>
+                  );
+                })}
+              </div>
             </section>
 
             <section className="conversation-settings-section">
               <div className="conversation-settings-section-header">
                 <div>
-                  <h2>Appearance</h2>
+                  <h2>Background</h2>
                   <IonText color="medium">
-                    <p>Follows your device light and dark mode automatically.</p>
-                  </IonText>
-                </div>
-              </div>
-              <div className="conversation-system-mode-card">
-                <span className="conversation-system-mode-icon">
-                  <IonIcon icon={phonePortraitOutline} />
-                </span>
-                <div>
-                  <strong>System Theme</strong>
-                  <p>Switch your device theme and this conversation will follow it.</p>
-                </div>
-              </div>
-            </section>
-
-            <section className="conversation-settings-section">
-              <div className="conversation-settings-section-header">
-                <div>
-                  <h2>Background Image</h2>
-                  <IonText color="medium">
-                    <p>Pick a gallery image if you want something custom.</p>
+                    <p>Shared by both users.</p>
                   </IonText>
                 </div>
               </div>
@@ -391,7 +477,7 @@ export default function ConversationSettings() {
 
             <section className="conversation-settings-actions">
               <IonButton expand="block" onClick={handleSave} disabled={saving}>
-                {saving ? <IonSpinner name="crescent" /> : 'Save Changes'}
+                {saving ? <IonSpinner name="crescent" /> : 'Save'}
               </IonButton>
             </section>
           </div>

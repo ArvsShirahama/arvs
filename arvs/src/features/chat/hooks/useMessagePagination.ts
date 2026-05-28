@@ -6,7 +6,7 @@ import {
   setCachedMessages,
   getConversationContext,
 } from '../services';
-import type { ConversationPreference, Message, Profile } from '../../../types/database';
+import type { ConversationParticipantProfile, ConversationPreference, Message, Profile } from '../../../types/database';
 
 const MESSAGE_PAGE_SIZE = 30;
 
@@ -19,6 +19,9 @@ export function useMessagePagination(
   const [messages, setMessages] = useState<Message[]>([]);
   const [otherUser, setOtherUser] = useState<Profile | null>(null);
   const [preference, setPreference] = useState<ConversationPreference | null>(null);
+  const [participants, setParticipants] = useState<ConversationParticipantProfile[]>([]);
+  const [nicknames, setNicknames] = useState<Record<string, string | null>>({});
+  const [otherUserNickname, setOtherUserNickname] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
   const [loadingOlder, setLoadingOlder] = useState(false);
   const [hasMoreMessages, setHasMoreMessages] = useState(true);
@@ -35,6 +38,9 @@ export function useMessagePagination(
       const context = await getConversationContext(conversationId, user.id);
       setOtherUser(context.otherUser);
       setPreference(context.preference);
+      setParticipants(context.participants);
+      setNicknames(context.nicknames);
+      setOtherUserNickname(context.otherUserNickname);
 
       const cached = getCachedMessages(conversationId);
       if (cached) {
@@ -55,6 +61,9 @@ export function useMessagePagination(
       console.error('Failed to load conversation context or messages', error);
       showToast('Failed to load this conversation. Please try again.');
       setMessages([]);
+      setParticipants([]);
+      setNicknames({});
+      setOtherUserNickname(null);
       setOldestCursor(null);
       setHasMoreMessages(false);
     } finally {
@@ -110,6 +119,12 @@ export function useMessagePagination(
     otherUser,
     preference,
     setPreference,
+    participants,
+    setParticipants,
+    nicknames,
+    setNicknames,
+    otherUserNickname,
+    setOtherUserNickname,
     loading,
     loadingOlder,
     hasMoreMessages,

@@ -8,17 +8,14 @@ import {
   IonContent,
   IonHeader,
   IonIcon,
-  IonItem,
-  IonList,
   IonPage,
-  IonPopover,
   IonSpinner,
   IonTitle,
   IonToolbar,
   useIonRouter,
   useIonToast,
 } from '@ionic/react';
-import { ellipsisVertical, imageOutline, settingsOutline, videocamOutline } from 'ionicons/icons';
+import { ellipsisVertical, videocamOutline } from 'ionicons/icons';
 import { useParams } from 'react-router-dom';
 import Avatar from '../../../components/Avatar';
 import { ChatBubble, MediaPreview, MediaViewerModal, MessageInput } from '../components';
@@ -34,7 +31,7 @@ import {
 } from '../hooks';
 import { supabase } from '../../../supabaseClient';
 import {
-  getConversationDisplayName,
+  getDisplayNameForParticipant,
   getConversationTheme,
 } from '../services';
 import type { Message } from '../../../types/database';
@@ -53,7 +50,6 @@ const Chat: React.FC = () => {
   const videoCall = useVideoCall(conversationId, user?.id);
 
   const [mediaViewer, setMediaViewer] = useState<{ src: string; type: 'image' | 'video' } | null>(null);
-  const [showChatMenu, setShowChatMenu] = useState(false);
   const [showCaptureSheet, setShowCaptureSheet] = useState(false);
   const [showGallerySheet, setShowGallerySheet] = useState(false);
 
@@ -86,6 +82,8 @@ const Chat: React.FC = () => {
     otherUser,
     preference,
     setPreference,
+    nicknames,
+    setNicknames,
     loading,
     loadingOlder,
     hasMoreMessages,
@@ -93,7 +91,7 @@ const Chat: React.FC = () => {
   } = useMessagePagination(conversationId, scrollToBottom, showToast);
 
   // Hook 2: Live realtime database updates and message receipts
-  useChatRealtime(conversationId, messages, loading, setMessages, setPreference, scrollToBottom);
+  useChatRealtime(conversationId, messages, loading, setMessages, setPreference, setNicknames, scrollToBottom);
 
   // Hook 3: Native & Web media capture, storage uploading, and message dispatch
   const {
@@ -211,7 +209,10 @@ const Chat: React.FC = () => {
     return `Last seen ${date.toLocaleDateString([], { month: 'short', day: 'numeric' })}`;
   }, [isOnline, otherUser]);
 
-  const displayName = getConversationDisplayName(otherUser, preference);
+  const displayName = getDisplayNameForParticipant(
+    otherUser,
+    otherUser ? nicknames[otherUser.id] ?? preference?.peer_nickname : null
+  );
 
   // Compute subtitle text: typing indicator > online status
   const subtitleText = peerIsTyping ? 'typing...' : lastSeenText;
@@ -251,7 +252,7 @@ const Chat: React.FC = () => {
             >
               <IonIcon icon={videocamOutline} />
             </IonButton>
-            <IonButton fill="clear" onClick={() => setShowChatMenu(true)} aria-label="Conversation options">
+            <IonButton fill="clear" onClick={() => router.push(`/chat/${conversationId}/settings`, 'forward')} aria-label="Conversation options">
               <IonIcon icon={ellipsisVertical} />
             </IonButton>
           </IonButtons>
@@ -409,33 +410,6 @@ const Chat: React.FC = () => {
         ]}
       />
 
-      <IonPopover isOpen={showChatMenu} onDidDismiss={() => setShowChatMenu(false)} className="chat-menu-popover">
-        <IonList lines="none">
-          <IonItem
-            button
-            detail={false}
-            onClick={() => {
-              setShowChatMenu(false);
-              router.push(`/chat/${conversationId}/settings`, 'forward');
-            }}
-          >
-            <IonIcon icon={settingsOutline} slot="start" />
-            Conversation Settings
-          </IonItem>
-          <IonItem
-            button
-            detail={false}
-            onClick={() => {
-              setShowChatMenu(false);
-              router.push(`/chat/${conversationId}/media`, 'forward');
-            }}
-          >
-            <IonIcon icon={imageOutline} slot="start" />
-            View All Media
-          </IonItem>
-        </IonList>
-      </IonPopover>
-
       <MediaPreview
         isOpen={!!mediaPreview}
         src={mediaPreview?.src ?? ''}
@@ -498,4 +472,3 @@ const Chat: React.FC = () => {
 };
 
 export default Chat;
-

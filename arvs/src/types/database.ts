@@ -27,6 +27,20 @@ export interface ConversationPreference {
   updated_at: string;
 }
 
+export interface ConversationNickname {
+  conversation_id: string;
+  user_id: string;
+  nickname: string | null;
+  updated_by: string | null;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface ConversationParticipantProfile {
+  profile: Profile;
+  nickname: string | null;
+}
+
 export interface ConversationParticipant {
   conversation_id: string;
   user_id: string;
@@ -74,6 +88,8 @@ export interface ConversationWithDetails {
   last_message: Message | null;
   unread_count: number;
   preference: ConversationPreference | null;
+  nicknames?: Record<string, string | null>;
+  other_user_nickname?: string | null;
 }
 
 export interface ConversationSummaryDTO {
@@ -83,6 +99,8 @@ export interface ConversationSummaryDTO {
   last_message: Message | null;
   unread_count: number;
   preference: ConversationPreference | null;
+  nicknames?: Record<string, string | null>;
+  other_user_nickname?: string | null;
 }
 
 export interface MessagePageCursor {

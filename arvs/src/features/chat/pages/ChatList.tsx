@@ -31,6 +31,7 @@ import {
 import { useAuth } from '../../auth/hooks';
 import {
   getConversationSummary,
+  getDisplayNameForParticipant,
   getSummaries,
   upsertSummaryFromRealtime,
 } from '../services';
@@ -92,9 +93,10 @@ const ChatList: React.FC = () => {
     if (!searchQuery.trim()) return conversations;
     const query = searchQuery.toLowerCase().trim();
     return conversations.filter((conv) => {
+      const nickname = (conv.other_user_nickname ?? conv.nicknames?.[conv.other_user.id] ?? '').toLowerCase();
       const displayName = conv.other_user?.display_name?.toLowerCase() || '';
       const username = conv.other_user?.username?.toLowerCase() || '';
-      return displayName.includes(query) || username.includes(query);
+      return nickname.includes(query) || displayName.includes(query) || username.includes(query);
     });
   }, [conversations, searchQuery]);
 
@@ -723,6 +725,21 @@ const ChatList: React.FC = () => {
           debouncedUpdate(conversationId);
         }
       )
+      .on(
+        'postgres_changes',
+        {
+          event: '*',
+          schema: 'public',
+          table: 'conversation_nicknames',
+        },
+        async (payload) => {
+          const conversationId = (payload.new as { conversation_id?: string } | null)?.conversation_id
+            ?? (payload.old as { conversation_id?: string } | null)?.conversation_id;
+          if (!conversationId) return;
+
+          debouncedUpdate(conversationId);
+        }
+      )
       .subscribe();
 
     return () => {
@@ -874,7 +891,10 @@ const ChatList: React.FC = () => {
 
               {/* Active online users */}
               {activeUsers.map((conv) => {
-                const displayName = conv.other_user?.display_name || 'User';
+                const displayName = getDisplayNameForParticipant(
+                  conv.other_user,
+                  conv.other_user_nickname ?? conv.nicknames?.[conv.other_user.id] ?? conv.preference?.peer_nickname
+                );
                 const firstName = displayName.split(' ')[0];
                 const userStories = storiesByUserId[conv.other_user.id] || [];
                 return (
@@ -936,9 +956,10 @@ const ChatList: React.FC = () => {
           <IonList lines="none" className="chatlist-list">
             {filteredConversations.map((conv) => {
               const userStories = storiesByUserId[conv.other_user.id] || [];
-              const displayName = conv.preference?.peer_nickname?.trim()
-                || conv.other_user.display_name
-                || conv.other_user.username;
+              const displayName = getDisplayNameForParticipant(
+                conv.other_user,
+                conv.other_user_nickname ?? conv.nicknames?.[conv.other_user.id] ?? conv.preference?.peer_nickname
+              );
               return (
               <ChatListItem
                 key={conv.id}

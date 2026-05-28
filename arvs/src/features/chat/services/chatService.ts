@@ -7,6 +7,7 @@ import type {
   MessagePageCursor,
   PaginatedMessagesState,
   Profile,
+  ConversationNickname,
 } from '../../../types/database';
 
 const DEFAULT_SUMMARY_PAGE_SIZE = 30;
@@ -27,7 +28,43 @@ function mapSummaryRow(row: ConversationSummaryDTO): ConversationWithDetails {
     last_message: row.last_message,
     unread_count: row.unread_count ?? 0,
     preference: row.preference,
+    nicknames: row.nicknames,
+    other_user_nickname: row.other_user_nickname ?? row.nicknames?.[row.other_user?.id],
   };
+}
+
+async function attachConversationNicknames(
+  summaries: ConversationWithDetails[]
+): Promise<ConversationWithDetails[]> {
+  if (summaries.length === 0) {
+    return summaries;
+  }
+
+  const conversationIds = summaries.map((summary) => summary.id);
+  const { data, error } = await supabase
+    .from('conversation_nicknames')
+    .select('*')
+    .in('conversation_id', conversationIds);
+
+  if (error) {
+    return summaries;
+  }
+
+  const byConversation = ((data as ConversationNickname[] | null) ?? [])
+    .reduce<Record<string, Record<string, string | null>>>((acc, row) => {
+      acc[row.conversation_id] ??= {};
+      acc[row.conversation_id][row.user_id] = row.nickname;
+      return acc;
+    }, {});
+
+  return summaries.map((summary) => {
+    const nicknames = byConversation[summary.id] ?? summary.nicknames ?? {};
+    return {
+      ...summary,
+      nicknames,
+      other_user_nickname: nicknames[summary.other_user.id] ?? summary.preference?.peer_nickname ?? null,
+    };
+  });
 }
 
 async function getConversationSummaryFallback(
@@ -43,7 +80,7 @@ async function getConversationSummaryFallback(
   const otherUserId = participants?.[0]?.user_id;
   if (!otherUserId) return null;
 
-  const [{ data: otherProfile }, { data: lastMsg }, { data: myParticipant }, { data: preference }] = await Promise.all([
+  const [{ data: otherProfile }, { data: lastMsg }, { data: myParticipant }, { data: preference }, { data: nicknames }] = await Promise.all([
     supabase.from('profiles').select('*').eq('id', otherUserId).single(),
     supabase
       .from('messages')
@@ -64,6 +101,10 @@ async function getConversationSummaryFallback(
       .eq('conversation_id', conversationId)
       .eq('user_id', currentUserId)
       .maybeSingle(),
+    supabase
+      .from('conversation_nicknames')
+      .select('*')
+      .eq('conversation_id', conversationId),
   ]);
 
   let unreadCount = 0;
@@ -93,6 +134,11 @@ async function getConversationSummaryFallback(
   }
 
   const updatedAt = lastMsg?.created_at ?? new Date().toISOString();
+  const nicknameMap = ((nicknames as ConversationNickname[] | null) ?? [])
+    .reduce<Record<string, string | null>>((acc, row) => {
+      acc[row.user_id] = row.nickname;
+      return acc;
+    }, {});
   return {
     id: conversationId,
     updated_at: updatedAt,
@@ -100,6 +146,8 @@ async function getConversationSummaryFallback(
     last_message: (lastMsg as Message) ?? null,
     unread_count: unreadCount,
     preference: (preference as ConversationPreference | null) ?? null,
+    nicknames: nicknameMap,
+    other_user_nickname: nicknameMap[otherUserId] ?? (preference as ConversationPreference | null)?.peer_nickname ?? null,
   };
 }
 
@@ -155,7 +203,7 @@ export async function getSummaries(
     return getSummariesFallback(currentUserId, limit, before);
   }
 
-  return ((data as ConversationSummaryDTO[]) ?? []).map(mapSummaryRow);
+  return attachConversationNicknames(((data as ConversationSummaryDTO[]) ?? []).map(mapSummaryRow));
 }
 
 export async function getConversationSummary(

@@ -35,11 +35,19 @@ export function getConversationTheme(themeId?: string | null): ConversationTheme
 
 export function getConversationDisplayName(
   otherUser: Profile | null,
-  preference: ConversationPreference | null
+  preferenceOrNickname: ConversationPreference | string | null
 ): string {
-  const nickname = preference?.peer_nickname?.trim();
+  const nickname = typeof preferenceOrNickname === 'string'
+    ? preferenceOrNickname.trim()
+    : preferenceOrNickname?.peer_nickname?.trim();
   if (nickname) return nickname;
   return otherUser?.display_name || otherUser?.username || 'Chat';
+}
+
+export function getDisplayNameForParticipant(profile: Profile | null, nickname?: string | null): string {
+  const trimmedNickname = nickname?.trim();
+  if (trimmedNickname) return trimmedNickname;
+  return profile?.display_name || profile?.username || 'User';
 }
 
 export function formatFileSize(bytes: number | null): string {

@@ -3,6 +3,8 @@ import {
   getConversationPreference,
   getConversationContext,
   saveConversationPreference,
+  saveConversationParticipantNickname,
+  saveSharedConversationAppearance,
   getConversationMediaPage,
 } from '../../features/chat/services/conversationService';
 import { supabase } from '../../supabaseClient';
@@ -22,6 +24,7 @@ vi.mock('../../supabaseClient', () => ({
       single: vi.fn(),
       upsert: vi.fn().mockReturnThis(),
     })),
+    rpc: vi.fn(),
     storage: {
       from: vi.fn(() => ({
         upload: vi.fn(),
@@ -33,10 +36,12 @@ vi.mock('../../supabaseClient', () => ({
 }));
 
 const mockedSupabaseFrom = supabase.from as unknown as Mock;
+const mockedSupabaseRpc = supabase.rpc as unknown as Mock;
 
 describe('conversationService', () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    mockedSupabaseRpc.mockResolvedValue({ data: null, error: { message: 'RPC not available' } });
   });
 
   describe('getConversationPreference', () => {
@@ -98,6 +103,14 @@ describe('conversationService', () => {
 
   describe('getConversationContext', () => {
     it('should fetch both participants and preference', async () => {
+      const mockCurrentUser = {
+        id: 'user-1',
+        username: 'arvin',
+        display_name: 'Arvin',
+        avatar_url: null,
+        last_seen: null,
+        created_at: '2024-01-01T00:00:00Z',
+      };
       const mockOtherUser = {
         id: 'user-2',
         username: 'janedoe',
@@ -107,27 +120,29 @@ describe('conversationService', () => {
         created_at: '2024-01-01T00:00:00Z',
       };
 
-      const mockParticipants = [{ user_id: 'user-2' }];
+      const mockParticipants = [{ user_id: 'user-1' }, { user_id: 'user-2' }];
 
       // Mock for Promise.all: first query returns participants
       const mockParticipantsQuery = {
         select: vi.fn().mockReturnThis(),
-        eq: vi.fn().mockReturnThis(),
-        neq: vi.fn().mockResolvedValue({ data: mockParticipants, error: null }),
+        eq: vi.fn().mockResolvedValue({ data: mockParticipants, error: null }),
       };
 
-      // Mock for getConversationPreference (called within Promise.all)
+      // Mock for conversation preferences (called within Promise.all)
       const mockPreferenceQuery = {
         select: vi.fn().mockReturnThis(),
-        eq: vi.fn().mockReturnThis(),
-        maybeSingle: vi.fn().mockResolvedValue({ data: null, error: null }),
+        eq: vi.fn().mockResolvedValue({ data: [], error: null }),
+      };
+
+      const mockNicknameQuery = {
+        select: vi.fn().mockReturnThis(),
+        eq: vi.fn().mockResolvedValue({ data: [], error: null }),
       };
 
       // Mock for profile query (called after Promise.all)
       const mockProfileQuery = {
         select: vi.fn().mockReturnThis(),
-        eq: vi.fn().mockReturnThis(),
-        single: vi.fn().mockResolvedValue({ data: mockOtherUser, error: null }),
+        in: vi.fn().mockResolvedValue({ data: [mockCurrentUser, mockOtherUser], error: null }),
       };
 
       mockedSupabaseFrom.mockImplementation((table: string) => {
@@ -137,6 +152,9 @@ describe('conversationService', () => {
         if (table === 'conversation_preferences') {
           return mockPreferenceQuery;
         }
+        if (table === 'conversation_nicknames') {
+          return mockNicknameQuery;
+        }
         return mockProfileQuery;
       });
 
@@ -144,23 +162,71 @@ describe('conversationService', () => {
 
       expect(result.otherUser).toEqual(mockOtherUser);
       expect(result.preference).toBeNull();
+      expect(result.participants).toHaveLength(2);
     });
 
     it('should return null otherUser when no other participant exists', async () => {
-      const mockMaybeSingle = vi.fn()
-        .mockResolvedValueOnce({ data: [], error: null })
-        .mockResolvedValueOnce({ data: null, error: null });
-
-      mockedSupabaseFrom.mockReturnValue({
+      mockedSupabaseFrom.mockImplementation((table: string) => ({
         select: vi.fn().mockReturnThis(),
-        eq: vi.fn().mockReturnThis(),
-        neq: vi.fn().mockReturnThis(),
-        maybeSingle: mockMaybeSingle,
-      });
+        eq: vi.fn().mockResolvedValue({
+          data: table === 'conversation_participants' ? [{ user_id: 'user-1' }] : [],
+          error: null,
+        }),
+      }));
 
       const result = await getConversationContext('conv-1', 'user-1');
 
       expect(result.otherUser).toBeNull();
+    });
+
+    it('should combine current user nickname with shared background from another participant', async () => {
+      const ownPreference = {
+        conversation_id: 'conv-1',
+        user_id: 'user-1',
+        peer_nickname: 'Bestie',
+        theme_id: 'system',
+        background_type: 'gradient',
+        background_image_url: null,
+        background_image_path: null,
+        created_at: '2024-01-01T00:00:00Z',
+        updated_at: '2024-01-01T00:00:00Z',
+      };
+      const peerPreference = {
+        ...ownPreference,
+        user_id: 'user-2',
+        peer_nickname: 'Arvin',
+        background_type: 'image',
+        background_image_url: 'https://example.com/shared.jpg',
+        background_image_path: 'user-2/conv-1/shared.jpg',
+      };
+
+      mockedSupabaseFrom.mockImplementation((table: string) => {
+        if (table === 'conversation_participants') {
+          return {
+            select: vi.fn().mockReturnThis(),
+            eq: vi.fn().mockResolvedValue({
+              data: [{ user_id: 'user-1' }, { user_id: 'user-2' }],
+              error: null,
+            }),
+          };
+        }
+        if (table === 'conversation_preferences') {
+          return {
+            select: vi.fn().mockReturnThis(),
+            eq: vi.fn().mockResolvedValue({ data: [ownPreference, peerPreference], error: null }),
+          };
+        }
+        return {
+          select: vi.fn().mockReturnThis(),
+          eq: vi.fn().mockReturnThis(),
+          single: vi.fn().mockResolvedValue({ data: null, error: null }),
+        };
+      });
+
+      const result = await getConversationContext('conv-1', 'user-1');
+
+      expect(result.preference?.peer_nickname).toBe('Bestie');
+      expect(result.preference?.background_image_url).toBe('https://example.com/shared.jpg');
     });
   });
 
@@ -209,6 +275,112 @@ describe('conversationService', () => {
       await expect(
         saveConversationPreference('conv-1', 'user-1', { peer_nickname: 'Test' })
       ).rejects.toThrow('Constraint violation');
+    });
+  });
+
+  describe('saveSharedConversationAppearance', () => {
+    it('should use RPC when available', async () => {
+      const mockPreference = {
+        conversation_id: 'conv-1',
+        user_id: 'user-1',
+        peer_nickname: 'Jane',
+        theme_id: 'system',
+        background_type: 'image',
+        background_image_url: 'https://example.com/bg.jpg',
+        background_image_path: 'user-1/conv-1/bg.jpg',
+        created_at: '2024-01-01T00:00:00Z',
+        updated_at: '2024-01-01T00:00:00Z',
+      };
+      mockedSupabaseRpc.mockResolvedValue({ data: mockPreference, error: null });
+
+      const result = await saveSharedConversationAppearance('conv-1', 'user-1', {
+        theme_id: 'system',
+        background_type: 'image',
+        background_image_url: 'https://example.com/bg.jpg',
+        background_image_path: 'user-1/conv-1/bg.jpg',
+      });
+
+      expect(mockedSupabaseRpc).toHaveBeenCalledWith('save_shared_conversation_appearance', {
+        p_conversation_id: 'conv-1',
+        p_theme_id: 'system',
+        p_background_type: 'image',
+        p_background_image_url: 'https://example.com/bg.jpg',
+        p_background_image_path: 'user-1/conv-1/bg.jpg',
+      });
+      expect(result).toEqual(mockPreference);
+    });
+
+    it('should update both participant rows while preserving their nicknames', async () => {
+      const existingPreferences = [
+        {
+          conversation_id: 'conv-1',
+          user_id: 'user-1',
+          peer_nickname: 'Jane',
+          theme_id: 'system',
+          background_type: 'gradient',
+          background_image_url: null,
+          background_image_path: null,
+          created_at: '2024-01-01T00:00:00Z',
+          updated_at: '2024-01-01T00:00:00Z',
+        },
+        {
+          conversation_id: 'conv-1',
+          user_id: 'user-2',
+          peer_nickname: 'Arvin',
+          theme_id: 'system',
+          background_type: 'gradient',
+          background_image_url: null,
+          background_image_path: null,
+          created_at: '2024-01-01T00:00:00Z',
+          updated_at: '2024-01-01T00:00:00Z',
+        },
+      ];
+      const mockUpsert = vi.fn();
+      const mockSelectAfterUpsert = vi.fn().mockResolvedValue({
+        data: existingPreferences.map((preference) => ({
+          ...preference,
+          background_type: 'image',
+          background_image_url: 'https://example.com/bg.jpg',
+          background_image_path: 'user-1/conv-1/bg.jpg',
+        })),
+        error: null,
+      });
+      mockUpsert.mockReturnValue({ select: mockSelectAfterUpsert });
+
+      mockedSupabaseFrom.mockImplementation((table: string) => {
+        if (table === 'conversation_participants') {
+          return {
+            select: vi.fn().mockReturnThis(),
+            eq: vi.fn().mockResolvedValue({
+              data: [{ user_id: 'user-1' }, { user_id: 'user-2' }],
+              error: null,
+            }),
+          };
+        }
+
+        return {
+          select: vi.fn().mockReturnThis(),
+          eq: vi.fn().mockResolvedValue({ data: existingPreferences, error: null }),
+          upsert: mockUpsert,
+        };
+      });
+
+      const result = await saveSharedConversationAppearance('conv-1', 'user-1', {
+        theme_id: 'system',
+        background_type: 'image',
+        background_image_url: 'https://example.com/bg.jpg',
+        background_image_path: 'user-1/conv-1/bg.jpg',
+      });
+
+      expect(mockUpsert).toHaveBeenCalledWith(
+        expect.arrayContaining([
+          expect.objectContaining({ user_id: 'user-1', peer_nickname: 'Jane' }),
+          expect.objectContaining({ user_id: 'user-2', peer_nickname: 'Arvin' }),
+        ]),
+        { onConflict: 'conversation_id,user_id' }
+      );
+      expect(result.user_id).toBe('user-1');
+      expect(result.background_image_url).toBe('https://example.com/bg.jpg');
     });
   });
 

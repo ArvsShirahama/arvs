@@ -2,7 +2,7 @@ import { useCallback, useEffect } from 'react';
 import { supabase } from '../../../supabaseClient';
 import { useAuth } from '../../auth/hooks';
 import { invalidateMessageCache } from '../services';
-import type { ConversationPreference, Message } from '../../../types/database';
+import type { ConversationNickname, ConversationPreference, Message } from '../../../types/database';
 
 export function useChatRealtime(
   conversationId: string,
@@ -10,6 +10,7 @@ export function useChatRealtime(
   loading: boolean,
   setMessages: React.Dispatch<React.SetStateAction<Message[]>>,
   setPreference: React.Dispatch<React.SetStateAction<ConversationPreference | null>>,
+  setNicknames: React.Dispatch<React.SetStateAction<Record<string, string | null>>>,
   scrollToBottom: () => void
 ) {
   const { user } = useAuth();
@@ -127,12 +128,35 @@ export function useChatRealtime(
           setPreference(payload.new as ConversationPreference);
         }
       )
+      .on(
+        'postgres_changes',
+        {
+          event: '*',
+          schema: 'public',
+          table: 'conversation_nicknames',
+          filter: `conversation_id=eq.${conversationId}`,
+        },
+        (payload) => {
+          const nextRow = (payload.new || payload.old) as ConversationNickname | undefined;
+          if (!nextRow) return;
+
+          setNicknames((current) => {
+            const next = { ...current };
+            if (payload.eventType === 'DELETE') {
+              delete next[nextRow.user_id];
+            } else {
+              next[nextRow.user_id] = (payload.new as ConversationNickname).nickname;
+            }
+            return next;
+          });
+        }
+      )
       .subscribe();
 
     return () => {
       void supabase.removeChannel(channel);
     };
-  }, [conversationId, scrollToBottom, setMessages, setPreference, user]);
+  }, [conversationId, scrollToBottom, setMessages, setNicknames, setPreference, user]);
 }
 
 
