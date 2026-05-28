@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { getConversationDisplayName, formatFileSize, getConversationTheme } from '../conversationThemes';
+import { getConversationDisplayName, formatFileSize, getConversationTheme } from '../../features/chat/services/conversationThemes';
 import type { Profile, ConversationPreference } from '../../types/database';
 
 describe('conversationThemes', () => {

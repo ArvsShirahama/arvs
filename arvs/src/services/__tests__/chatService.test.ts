@@ -1,4 +1,4 @@
-import { describe, it, expect, beforeEach, vi } from 'vitest';
+import { describe, it, expect, beforeEach, vi, type Mock } from 'vitest';
 import {
   getSummaries,
   getConversationSummary,
@@ -6,7 +6,7 @@ import {
   getMessagesPage,
   getCachedMessages,
   setCachedMessages,
-} from '../chatService';
+} from '../../features/chat/services/chatService';
 import { supabase } from '../../supabaseClient';
 import type { ConversationWithDetails, Message, Profile } from '../../types/database';
 
@@ -27,6 +27,9 @@ vi.mock('../../supabaseClient', () => ({
     })),
   },
 }));
+
+const mockedSupabaseFrom = supabase.from as unknown as Mock;
+const mockedSupabaseRpc = supabase.rpc as unknown as Mock;
 
 describe('chatService', () => {
   beforeEach(() => {
@@ -126,7 +129,7 @@ describe('chatService', () => {
       const mockOrder = vi.fn().mockReturnThis();
       const mockLimit = vi.fn().mockResolvedValue({ data: mockMessages, error: null });
 
-      (supabase.from as any).mockReturnValue({
+      mockedSupabaseFrom.mockReturnValue({
         select: mockSelect,
         eq: mockEq,
         order: mockOrder,
@@ -152,7 +155,7 @@ describe('chatService', () => {
       const mockError = { message: 'Database error' };
       const mockLimit = vi.fn().mockResolvedValue({ data: null, error: mockError });
 
-      (supabase.from as any).mockReturnValue({
+      mockedSupabaseFrom.mockReturnValue({
         select: vi.fn().mockReturnThis(),
         eq: vi.fn().mockReturnThis(),
         order: vi.fn().mockReturnThis(),
@@ -173,7 +176,7 @@ describe('chatService', () => {
 
       const mockLimit = vi.fn().mockResolvedValue({ data: mockMessages, error: null });
 
-      (supabase.from as any).mockReturnValue({
+      mockedSupabaseFrom.mockReturnValue({
         select: vi.fn().mockReturnThis(),
         eq: vi.fn().mockReturnThis(),
         order: vi.fn().mockReturnThis(),
@@ -239,7 +242,7 @@ describe('chatService', () => {
         },
       ];
 
-      (supabase.rpc as any).mockResolvedValue({ data: mockRpcData, error: null });
+      mockedSupabaseRpc.mockResolvedValue({ data: mockRpcData, error: null });
 
       const result = await getSummaries('user-1', 30, null);
 
@@ -253,14 +256,14 @@ describe('chatService', () => {
     });
 
     it('should fallback to manual query when RPC fails', async () => {
-      (supabase.rpc as any).mockResolvedValue({ data: null, error: { message: 'RPC not found' } });
+      mockedSupabaseRpc.mockResolvedValue({ data: null, error: { message: 'RPC not found' } });
 
       const mockSelect = vi.fn().mockReturnThis();
       const mockEq = vi.fn().mockReturnThis();
       const mockOrder = vi.fn().mockReturnThis();
       const mockLimit = vi.fn().mockResolvedValue({ data: [], error: null });
 
-      (supabase.from as any).mockReturnValue({
+      mockedSupabaseFrom.mockReturnValue({
         select: mockSelect,
         eq: mockEq,
         order: mockOrder,
@@ -278,7 +281,7 @@ describe('chatService', () => {
     it('should use fallback implementation', async () => {
       const mockMaybeSingle = vi.fn().mockResolvedValue({ data: null, error: null });
 
-      (supabase.from as any).mockReturnValue({
+      mockedSupabaseFrom.mockReturnValue({
         select: vi.fn().mockReturnThis(),
         eq: vi.fn().mockReturnThis(),
         neq: vi.fn().mockReturnThis(),
@@ -293,3 +296,4 @@ describe('chatService', () => {
     });
   });
 });
+

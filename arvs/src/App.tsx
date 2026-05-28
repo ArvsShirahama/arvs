@@ -13,17 +13,18 @@ import {
 } from '@ionic/react';
 import { IonReactRouter } from '@ionic/react-router';
 import { chatbubblesOutline, personOutline } from 'ionicons/icons';
-import { useAuth } from './hooks/useAuth';
+import { useAuth } from './features/auth/hooks';
 
 import PushNotificationManager from './components/PushNotificationManager';
 import { initializeThemeMode } from './services/themeService';
-import Login from './pages/Login';
-import SignUp from './pages/SignUp';
-import ChatList from './pages/ChatList';
-import Chat from './pages/Chat';
-import ConversationSettings from './pages/ConversationSettings';
-import ConversationMedia from './pages/ConversationMedia';
-import Profile from './pages/Profile';
+import { LoginPage, SignUpPage } from './features/auth/pages';
+import {
+  ChatListPage,
+  ChatPage,
+  ConversationMediaPage,
+  ConversationSettingsPage,
+} from './features/chat/pages';
+import { ProfilePage } from './features/profile/pages';
 
 /* Core CSS required for Ionic components to work properly */
 import '@ionic/react/css/core.css';
@@ -80,21 +81,21 @@ const App: React.FC = () => {
         <IonRouterOutlet>
           {/* Auth routes */}
           <Route exact path="/login">
-            {session ? <Redirect to="/tabs/chats" /> : <Login />}
+            {session ? <Redirect to="/tabs/chats" /> : <LoginPage />}
           </Route>
           <Route exact path="/signup">
-            {session ? <Redirect to="/tabs/chats" /> : <SignUp />}
+            {session ? <Redirect to="/tabs/chats" /> : <SignUpPage />}
           </Route>
 
           {/* Chat detail (outside tabs so tab bar is hidden) */}
           <Route exact path="/chat/:conversationId">
-            {session ? <Chat /> : <Redirect to="/login" />}
+            {session ? <ChatPage /> : <Redirect to="/login" />}
           </Route>
           <Route exact path="/chat/:conversationId/settings">
-            {session ? <ConversationSettings /> : <Redirect to="/login" />}
+            {session ? <ConversationSettingsPage /> : <Redirect to="/login" />}
           </Route>
           <Route exact path="/chat/:conversationId/media">
-            {session ? <ConversationMedia /> : <Redirect to="/login" />}
+            {session ? <ConversationMediaPage /> : <Redirect to="/login" />}
           </Route>
 
           {/* Tab routes */}
@@ -102,8 +103,8 @@ const App: React.FC = () => {
             {session ? (
               <IonTabs>
                 <IonRouterOutlet>
-                  <Route exact path="/tabs/chats" component={ChatList} />
-                  <Route exact path="/tabs/profile" component={Profile} />
+                  <Route exact path="/tabs/chats" component={ChatListPage} />
+                  <Route exact path="/tabs/profile" component={ProfilePage} />
                   <Redirect exact from="/tabs" to="/tabs/chats" />
                 </IonRouterOutlet>
                 <IonTabBar slot="bottom">

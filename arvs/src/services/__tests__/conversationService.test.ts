@@ -1,10 +1,10 @@
-import { describe, it, expect, beforeEach, vi } from 'vitest';
+import { describe, it, expect, beforeEach, vi, type Mock } from 'vitest';
 import {
   getConversationPreference,
   getConversationContext,
   saveConversationPreference,
   getConversationMediaPage,
-} from '../conversationService';
+} from '../../features/chat/services/conversationService';
 import { supabase } from '../../supabaseClient';
 
 // Mock Supabase client
@@ -32,6 +32,8 @@ vi.mock('../../supabaseClient', () => ({
   },
 }));
 
+const mockedSupabaseFrom = supabase.from as unknown as Mock;
+
 describe('conversationService', () => {
   beforeEach(() => {
     vi.clearAllMocks();
@@ -53,7 +55,7 @@ describe('conversationService', () => {
 
       const mockMaybeSingle = vi.fn().mockResolvedValue({ data: mockPreference, error: null });
 
-      (supabase.from as any).mockReturnValue({
+      mockedSupabaseFrom.mockReturnValue({
         select: vi.fn().mockReturnThis(),
         eq: vi.fn().mockReturnThis(),
         maybeSingle: mockMaybeSingle,
@@ -67,7 +69,7 @@ describe('conversationService', () => {
     it('should return null when preference does not exist', async () => {
       const mockMaybeSingle = vi.fn().mockResolvedValue({ data: null, error: null });
 
-      (supabase.from as any).mockReturnValue({
+      mockedSupabaseFrom.mockReturnValue({
         select: vi.fn().mockReturnThis(),
         eq: vi.fn().mockReturnThis(),
         maybeSingle: mockMaybeSingle,
@@ -82,7 +84,7 @@ describe('conversationService', () => {
       const mockError = { message: 'Database error' };
       const mockMaybeSingle = vi.fn().mockResolvedValue({ data: null, error: mockError });
 
-      (supabase.from as any).mockReturnValue({
+      mockedSupabaseFrom.mockReturnValue({
         select: vi.fn().mockReturnThis(),
         eq: vi.fn().mockReturnThis(),
         maybeSingle: mockMaybeSingle,
@@ -128,16 +130,14 @@ describe('conversationService', () => {
         single: vi.fn().mockResolvedValue({ data: mockOtherUser, error: null }),
       };
 
-      let callCount = 0;
-      (supabase.from as any).mockImplementation((table: string) => {
-        callCount++;
+      mockedSupabaseFrom.mockImplementation((table: string) => {
         if (table === 'conversation_participants') {
           return mockParticipantsQuery;
-        } else if (table === 'conversation_preferences') {
-          return mockPreferenceQuery;
-        } else {
-          return mockProfileQuery;
         }
+        if (table === 'conversation_preferences') {
+          return mockPreferenceQuery;
+        }
+        return mockProfileQuery;
       });
 
       const result = await getConversationContext('conv-1', 'user-1');
@@ -151,7 +151,7 @@ describe('conversationService', () => {
         .mockResolvedValueOnce({ data: [], error: null })
         .mockResolvedValueOnce({ data: null, error: null });
 
-      (supabase.from as any).mockReturnValue({
+      mockedSupabaseFrom.mockReturnValue({
         select: vi.fn().mockReturnThis(),
         eq: vi.fn().mockReturnThis(),
         neq: vi.fn().mockReturnThis(),
@@ -180,7 +180,7 @@ describe('conversationService', () => {
 
       const mockSingle = vi.fn().mockResolvedValue({ data: mockPreference, error: null });
 
-      (supabase.from as any).mockReturnValue({
+      mockedSupabaseFrom.mockReturnValue({
         upsert: vi.fn().mockReturnThis(),
         select: vi.fn().mockReturnThis(),
         single: mockSingle,
@@ -200,7 +200,7 @@ describe('conversationService', () => {
       const mockError = { message: 'Constraint violation' };
       const mockSingle = vi.fn().mockResolvedValue({ data: null, error: mockError });
 
-      (supabase.from as any).mockReturnValue({
+      mockedSupabaseFrom.mockReturnValue({
         upsert: vi.fn().mockReturnThis(),
         select: vi.fn().mockReturnThis(),
         single: mockSingle,
@@ -225,7 +225,7 @@ describe('conversationService', () => {
 
       const mockLimit = vi.fn().mockResolvedValue({ data: mockMessages, error: null });
 
-      (supabase.from as any).mockReturnValue({
+      mockedSupabaseFrom.mockReturnValue({
         select: vi.fn().mockReturnThis(),
         eq: vi.fn().mockReturnThis(),
         in: vi.fn().mockReturnThis(),
@@ -252,7 +252,7 @@ describe('conversationService', () => {
 
       const mockLimit = vi.fn().mockResolvedValue({ data: mockMessages, error: null });
 
-      (supabase.from as any).mockReturnValue({
+      mockedSupabaseFrom.mockReturnValue({
         select: vi.fn().mockReturnThis(),
         eq: vi.fn().mockReturnThis(),
         in: vi.fn().mockReturnThis(),
@@ -275,7 +275,7 @@ describe('conversationService', () => {
       const mockError = { message: 'Query failed' };
       const mockLimit = vi.fn().mockResolvedValue({ data: null, error: mockError });
 
-      (supabase.from as any).mockReturnValue({
+      mockedSupabaseFrom.mockReturnValue({
         select: vi.fn().mockReturnThis(),
         eq: vi.fn().mockReturnThis(),
         in: vi.fn().mockReturnThis(),
@@ -289,3 +289,4 @@ describe('conversationService', () => {
     });
   });
 });
+

@@ -6,7 +6,7 @@ import {
   type PushNotificationSchema,
 } from '@capacitor/push-notifications';
 import { useLocation } from 'react-router-dom';
-import { useAuth } from '../hooks/useAuth';
+import { useAuth } from '../features/auth/hooks';
 import {
   clearStoredPushToken,
   upsertPushTokenRegistration,

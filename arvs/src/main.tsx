@@ -1,7 +1,7 @@
 import React from 'react';
 import { createRoot } from 'react-dom/client';
 import App from './App';
-import { AuthProvider } from './context/AuthContext';
+import { AuthProvider } from './features/auth/context';
 
 const container = document.getElementById('root');
 const root = createRoot(container!);
