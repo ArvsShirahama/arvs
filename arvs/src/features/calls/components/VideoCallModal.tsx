@@ -15,6 +15,7 @@ import {
   videocam,
   videocamOff,
   chevronDown,
+  tvOutline,
 } from 'ionicons/icons';
 import type { CallStatus } from '../hooks/useVideoCall';
 import './VideoCallModal.css';
@@ -33,6 +34,7 @@ interface VideoCallModalProps {
   onToggleMute: () => void;
   onToggleVideo: () => void;
   onMinimize: () => void;
+  onTriggerPiP?: () => void;
 }
 
 function formatDuration(seconds: number): string {
@@ -80,6 +82,7 @@ export default function VideoCallModal({
   onToggleMute,
   onToggleVideo,
   onMinimize,
+  onTriggerPiP,
 }: VideoCallModalProps) {
   const localVideoRef = useRef<HTMLVideoElement>(null);
   const remoteVideoRef = useRef<HTMLVideoElement>(null);
@@ -161,7 +164,7 @@ export default function VideoCallModal({
           {...{ 'webkit-playsinline': 'true' } as React.HTMLAttributes<HTMLVideoElement>}
         />
 
-        {/* Minimize Button */}
+        {/* Minimize & PiP Buttons */}
         {(callStatus === 'calling' || callStatus === 'connecting' || callStatus === 'active') && (
           <div className="video-call-top-bar">
             <button
@@ -171,6 +174,15 @@ export default function VideoCallModal({
             >
               <IonIcon icon={chevronDown} />
             </button>
+            {typeof document !== 'undefined' && 'pictureInPictureEnabled' in document && document.pictureInPictureEnabled && onTriggerPiP && (
+              <button
+                className="video-call-minimize-btn video-call-pip-btn"
+                onClick={onTriggerPiP}
+                aria-label="Enter Picture-in-Picture"
+              >
+                <IonIcon icon={tvOutline} />
+              </button>
+            )}
           </div>
         )}
 

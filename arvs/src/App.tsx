@@ -16,6 +16,8 @@ import { chatbubblesOutline, personOutline } from 'ionicons/icons';
 import { useAuth } from './features/auth/hooks';
 
 import PushNotificationManager from './components/PushNotificationManager';
+import GlobalActiveCallBanner from './components/GlobalActiveCallBanner';
+import GlobalVideoCallPiP from './components/GlobalVideoCallPiP';
 import { initializeThemeMode } from './services/themeService';
 import { LoginPage, SignUpPage } from './features/auth/pages';
 import {
@@ -78,6 +80,8 @@ const App: React.FC = () => {
     <IonApp>
       <IonReactRouter>
         <PushNotificationManager />
+        <GlobalActiveCallBanner />
+        <GlobalVideoCallPiP />
         <IonRouterOutlet>
           {/* Auth routes */}
           <Route exact path="/login">

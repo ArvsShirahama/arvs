@@ -8,7 +8,6 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import {
   acceptCall,
-  cleanup,
   cleanupCall,
   endCall,
   onSignal,
@@ -16,6 +15,8 @@ import {
   subscribeToCallSignals,
   toggleMute,
   toggleVideo,
+  getActiveCallState,
+  setCallModalOpen,
 } from '../services';
 import type { SignalPayload } from '../services';
 
@@ -59,6 +60,29 @@ export function useVideoCall(conversationId: string, localUserId: string | undef
   const unansweredTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const callStatusRef = useRef<CallStatus>('idle');
   const activeCallIdRef = useRef<string | null>(null);
+
+  // Restore ongoing call state on mount if it matches the current conversationId
+  useEffect(() => {
+    const activeState = getActiveCallState();
+    if (
+      activeState.conversationId === conversationId &&
+      activeState.callId &&
+      (activeState.peerConnectionState === 'connected' ||
+        activeState.peerConnectionState === 'connecting' ||
+        activeState.iceConnectionState === 'connected' ||
+        activeState.iceConnectionState === 'checking')
+    ) {
+      activeCallIdRef.current = activeState.callId;
+      setLocalStream(activeState.localStream);
+      setRemoteStream(activeState.remoteStream);
+      
+      const isConnected =
+        activeState.peerConnectionState === 'connected' ||
+        activeState.iceConnectionState === 'connected';
+      setCallStatus(isConnected ? 'active' : 'connecting');
+      setCallModalOpen(true);
+    }
+  }, [conversationId]);
 
   useEffect(() => {
     callStatusRef.current = callStatus;
@@ -188,7 +212,15 @@ export function useVideoCall(conversationId: string, localUserId: string | undef
             break;
           }
 
-          if (pcState === 'failed' || pcState === 'closed' || iceState === 'failed') {
+          if (pcState === 'failed' || iceState === 'failed') {
+            // ICE restart is attempted in callSignaling.ts — don't end the call.
+            // Only transition UI if we aren't already active (avoid downgrade).
+            if (callStatusRef.current === 'active') {
+              // Stay active — ICE restart may recover the connection.
+            } else {
+              setCallStatus('connecting');
+            }
+          } else if (pcState === 'closed') {
             cleanupCall();
             resetToEnded();
           }
@@ -231,10 +263,9 @@ export function useVideoCall(conversationId: string, localUserId: string | undef
   useEffect(() => {
     return () => {
       clearUnansweredTimeout();
-      if (callStatusRef.current !== 'idle') {
-        void endCall('hangup');
-      }
-      void cleanup();
+      // Do NOT end the call or cleanup on unmount.
+      // The call should persist even when navigating away from the Chat page
+      // or when the app is backgrounded. Only explicit hangUp() ends the call.
     };
   }, [clearUnansweredTimeout]);
 
@@ -243,6 +274,7 @@ export function useVideoCall(conversationId: string, localUserId: string | undef
 
     try {
       setCallStatus('calling');
+      setCallModalOpen(true);
       const { callId, localStream: ls, remoteStream: rs } = await startCall(
         conversationId,
         localUserId,
@@ -262,6 +294,7 @@ export function useVideoCall(conversationId: string, localUserId: string | undef
     if (!localUserId || !incomingCall) return;
 
     try {
+      setCallModalOpen(true);
       const { callId, localStream: ls, remoteStream: rs } = await acceptCall(
         incomingCall.conversationId,
         localUserId,

@@ -21,6 +21,11 @@ import {
   resolveThemeMode,
   setThemeMode,
 } from '../../../services/themeService';
+import {
+  getStoredPipEnabled,
+  setPipEnabled,
+  onPipModeChange,
+} from '../../../services/pipService';
 import { supabase } from '../../../supabaseClient';
 import Avatar from '../../../components/Avatar';
 import './Profile.css';
@@ -36,6 +41,7 @@ const Profile: React.FC = () => {
   const [saving, setSaving] = useState(false);
   const [uploading, setUploading] = useState(false);
   const [darkModeEnabled, setDarkModeEnabled] = useState(resolveThemeMode() === 'dark');
+  const [pipEnabled, setPipEnabledState] = useState(getStoredPipEnabled());
 
   useEffect(() => {
     setDisplayName(profile?.display_name ?? '');
@@ -45,6 +51,12 @@ const Profile: React.FC = () => {
   useEffect(() => {
     return onThemeModeChange((mode) => {
       setDarkModeEnabled(mode === 'dark');
+    });
+  }, []);
+
+  useEffect(() => {
+    return onPipModeChange((enabled) => {
+      setPipEnabledState(enabled);
     });
   }, []);
 
@@ -114,6 +126,11 @@ const Profile: React.FC = () => {
     setThemeMode(mode);
   };
 
+  const handlePipToggle = (checked: boolean) => {
+    setPipEnabledState(checked);
+    setPipEnabled(checked);
+  };
+
   return (
     <IonPage>
       <IonHeader>
@@ -178,6 +195,18 @@ const Profile: React.FC = () => {
                 checked={darkModeEnabled}
                 onIonChange={(event) => handleThemeToggle(event.detail.checked)}
                 aria-label="Toggle dark mode"
+              />
+            </IonItem>
+
+            <IonItem lines="none" className="profile-theme-item">
+              <IonLabel>
+                <h3>Picture-in-Picture (PiP) Mode</h3>
+                <p>Continue video calls in a floating window when exiting the app.</p>
+              </IonLabel>
+              <IonToggle
+                checked={pipEnabled}
+                onIonChange={(event) => handlePipToggle(event.detail.checked)}
+                aria-label="Toggle PiP mode"
               />
             </IonItem>
 

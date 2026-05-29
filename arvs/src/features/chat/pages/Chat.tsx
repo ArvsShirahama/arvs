@@ -20,9 +20,10 @@ import { useParams } from 'react-router-dom';
 import Avatar from '../../../components/Avatar';
 import { ChatBubble, MediaPreview, MediaViewerModal, MessageInput } from '../components';
 import ErrorBoundary from '../../../components/ErrorBoundary';
-import { IncomingCallOverlay, VideoCallModal, VideoCallPiP } from '../../calls/components';
+import { IncomingCallOverlay, VideoCallModal } from '../../calls/components';
 import { useVideoCall } from '../../calls/hooks';
 import { useAuth } from '../../auth/hooks';
+import { getActiveCallState, setCallModalOpen } from '../../calls/services';
 import {
   useChatRealtime,
   useMediaCapture,
@@ -47,15 +48,26 @@ const Chat: React.FC = () => {
   const router = useIonRouter();
   const [presentToast] = useIonToast();
 
-  const videoCall = useVideoCall(conversationId, user?.id);
-  const [isCallMinimized, setIsCallMinimized] = useState(false);
+  const showToast = useCallback((message: string, color: 'danger' | 'warning' | 'success' = 'danger') => {
+    presentToast({ message, color, duration: 2200, position: 'top' });
+  }, [presentToast]);
 
-  // Reset minimize state when call is idle or ringing
+  const videoCall = useVideoCall(conversationId, user?.id);
+  const [callState, setCallState] = useState(getActiveCallState());
+
+  // Listen for global call state changes to control call modal visibility
   useEffect(() => {
-    if (videoCall.callStatus === 'idle' || videoCall.callStatus === 'ringing') {
-      setIsCallMinimized(false);
-    }
-  }, [videoCall.callStatus]);
+    const handleStateChange = () => {
+      setCallState(getActiveCallState());
+    };
+    window.addEventListener('arvs-call-state-change', handleStateChange);
+    return () => window.removeEventListener('arvs-call-state-change', handleStateChange);
+  }, []);
+
+  const handleManualPiP = useCallback(() => {
+    // Dispatch custom event to enter native Picture-in-Picture on the persistent video element
+    window.dispatchEvent(new CustomEvent('arvs-trigger-native-pip'));
+  }, []);
 
   const [mediaViewer, setMediaViewer] = useState<{ src: string; type: 'image' | 'video' } | null>(null);
   const [showCaptureSheet, setShowCaptureSheet] = useState(false);
@@ -73,9 +85,7 @@ const Chat: React.FC = () => {
   const captureVideoInputRef = useRef<HTMLInputElement>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
-  const showToast = useCallback((message: string, color: 'danger' | 'warning' | 'success' = 'danger') => {
-    presentToast({ message, color, duration: 2200, position: 'top' });
-  }, [presentToast]);
+
 
   const scrollToBottom = useCallback(() => {
     requestAnimationFrame(() => {
@@ -438,7 +448,7 @@ const Chat: React.FC = () => {
 
       <VideoCallModal
         isOpen={
-          !isCallMinimized && (
+          callState.isModalOpen && (
             videoCall.callStatus === 'calling'
             || videoCall.callStatus === 'connecting'
             || videoCall.callStatus === 'active'
@@ -456,23 +466,9 @@ const Chat: React.FC = () => {
         onHangUp={videoCall.hangUp}
         onToggleMute={videoCall.toggleMuteAudio}
         onToggleVideo={videoCall.toggleCameraOff}
-        onMinimize={() => setIsCallMinimized(true)}
+        onMinimize={() => setCallModalOpen(false)}
+        onTriggerPiP={handleManualPiP}
       />
-
-      {isCallMinimized && (
-        videoCall.callStatus === 'calling'
-        || videoCall.callStatus === 'connecting'
-        || videoCall.callStatus === 'active'
-      ) && (
-        <VideoCallPiP
-          localStream={videoCall.localStream}
-          remoteStream={videoCall.remoteStream}
-          callStatus={videoCall.callStatus}
-          isVideoOff={videoCall.isVideoOff}
-          onMaximize={() => setIsCallMinimized(false)}
-          onHangUp={videoCall.hangUp}
-        />
-      )}
 
       <IncomingCallOverlay
         isOpen={videoCall.callStatus === 'ringing'}

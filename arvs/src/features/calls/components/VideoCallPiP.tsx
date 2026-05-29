@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from 'react';
 import { IonIcon } from '@ionic/react';
-import { call as callIcon, expandOutline } from 'ionicons/icons';
+import { call as callIcon, expandOutline, closeOutline } from 'ionicons/icons';
 import type { CallStatus } from '../hooks/useVideoCall';
 import './VideoCallPiP.css';
 
@@ -11,6 +11,7 @@ interface VideoCallPiPProps {
   isVideoOff: boolean;
   onMaximize: () => void;
   onHangUp: () => void;
+  onHide?: () => void;
 }
 
 function bindStreamToVideo(
@@ -36,6 +37,7 @@ export default function VideoCallPiP({
   isVideoOff,
   onMaximize,
   onHangUp,
+  onHide,
 }: VideoCallPiPProps) {
   const localVideoRef = useRef<HTMLVideoElement>(null);
   const remoteVideoRef = useRef<HTMLVideoElement>(null);
@@ -233,6 +235,15 @@ export default function VideoCallPiP({
         </div>
 
         <div className="video-call-pip-controls" onClick={(e) => e.stopPropagation()}>
+          {onHide && (
+            <button
+              className="video-call-pip-btn video-call-pip-btn-hide"
+              onClick={onHide}
+              aria-label="Hide floating video"
+            >
+              <IonIcon icon={closeOutline} />
+            </button>
+          )}
           <button
             className="video-call-pip-btn video-call-pip-btn-maximize"
             onClick={onMaximize}

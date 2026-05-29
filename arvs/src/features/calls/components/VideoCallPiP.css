@@ -111,7 +111,8 @@
   transform: scale(0.9);
 }
 
-.video-call-pip-btn-maximize:hover {
+.video-call-pip-btn-maximize:hover,
+.video-call-pip-btn-hide:hover {
   background: rgba(255, 255, 255, 0.4);
 }
 

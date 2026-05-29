@@ -36,7 +36,7 @@ export interface SignalPayload {
 
 export type SignalCallback = (payload: SignalPayload) => void;
 
-const ICE_DISCONNECTED_TIMEOUT_MS = 5000;
+const ICE_DISCONNECTED_TIMEOUT_MS = 30_000;
 
 function buildIceServers(): RTCIceServer[] {
   const servers: RTCIceServer[] = [
@@ -104,6 +104,7 @@ function emitSignal(payload: SignalPayload): void {
   for (const listener of signalListeners) {
     listener(payload);
   }
+  notifyCallStateChange();
 }
 
 function emitConnectionState(
@@ -300,16 +301,34 @@ function createPeerConnection(
         clearDisconnectedTimer();
         break;
       case 'disconnected':
+        // The OS may temporarily freeze the WebView network when the app is
+        // backgrounded. Give a generous timeout before considering the call dead.
         clearDisconnectedTimer();
         disconnectedTimer = setTimeout(() => {
           if (peerConnection && peerConnection.iceConnectionState === 'disconnected') {
-            void endCall('hangup');
+            // Try an ICE restart first — if the peer is still there it will recover.
+            try {
+              peerConnection.restartIce();
+            } catch {
+              void endCall('hangup');
+            }
           }
         }, ICE_DISCONNECTED_TIMEOUT_MS);
         break;
       case 'failed':
+        // Instead of immediately ending the call, attempt an ICE restart.
+        // Mobile browsers frequently report 'failed' after brief backgrounding
+        // but the underlying transport recovers once foregrounded.
         clearDisconnectedTimer();
-        void endCall('hangup');
+        if (peerConnection) {
+          try {
+            peerConnection.restartIce();
+          } catch {
+            void endCall('hangup');
+          }
+        } else {
+          void endCall('hangup');
+        }
         break;
       case 'closed':
         clearDisconnectedTimer();
@@ -409,6 +428,7 @@ export async function startCall(
     sdp: offer.sdp,
   });
 
+  notifyCallStateChange();
   return { callId, localStream: stream, remoteStream: remoteStream as MediaStream };
 }
 
@@ -458,6 +478,7 @@ export async function acceptCall(
     sdp: answer.sdp,
   });
 
+  notifyCallStateChange();
   return { callId, localStream: stream, remoteStream: remoteStream as MediaStream };
 }
 
@@ -560,6 +581,9 @@ export function cleanupCall(): void {
   pendingIceCandidatesByCallId.clear();
   currentCallId = null;
   currentRemoteUserId = null;
+  _isInAppPiPHidden = false;
+  _isNativePiPActive = false;
+  notifyCallStateChange();
 }
 
 export async function cleanup(): Promise<void> {
@@ -591,4 +615,68 @@ export function getCallDebugInfo(): Record<string, unknown> {
     remoteUserId: currentRemoteUserId,
   };
 }
+
+export function notifyCallStateChange(): void {
+  if (typeof window !== 'undefined') {
+    window.dispatchEvent(new CustomEvent('arvs-call-state-change'));
+  }
+}
+
+let _isCallModalOpen = false;
+let _isInAppPiPHidden = false;
+let _isNativePiPActive = false;
+
+export function setCallModalOpen(open: boolean): void {
+  _isCallModalOpen = open;
+  notifyCallStateChange();
+}
+
+export function getCallModalOpen(): boolean {
+  return _isCallModalOpen;
+}
+
+export function setInAppPiPHidden(hidden: boolean): void {
+  _isInAppPiPHidden = hidden;
+  notifyCallStateChange();
+}
+
+export function getInAppPiPHidden(): boolean {
+  return _isInAppPiPHidden;
+}
+
+export function setNativePiPActive(active: boolean): void {
+  _isNativePiPActive = active;
+  notifyCallStateChange();
+}
+
+export function getNativePiPActive(): boolean {
+  return _isNativePiPActive;
+}
+
+export interface ActiveCallState {
+  callId: string | null;
+  conversationId: string | null;
+  localStream: MediaStream | null;
+  remoteStream: MediaStream | null;
+  peerConnectionState: RTCPeerConnectionState | 'none';
+  iceConnectionState: RTCIceConnectionState | 'none';
+  isModalOpen: boolean;
+  isInAppPiPHidden: boolean;
+  isNativePiPActive: boolean;
+}
+
+export function getActiveCallState(): ActiveCallState {
+  return {
+    callId: currentCallId,
+    conversationId: currentConversationId,
+    localStream,
+    remoteStream,
+    peerConnectionState: peerConnection?.connectionState ?? 'none',
+    iceConnectionState: peerConnection?.iceConnectionState ?? 'none',
+    isModalOpen: _isCallModalOpen,
+    isInAppPiPHidden: _isInAppPiPHidden,
+    isNativePiPActive: _isNativePiPActive,
+  };
+}
+
 
