@@ -3,7 +3,7 @@
  *
  * Full-screen modal displayed during an active video call.
  * Shows remote video (large), local video (picture-in-picture),
- * and call controls (mute, camera toggle, hang up).
+ * and call controls (mute, camera toggle, hang up, minimize).
  */
 
 import { useEffect, useRef, useCallback } from 'react';
@@ -14,6 +14,7 @@ import {
   micOff,
   videocam,
   videocamOff,
+  chevronDown,
 } from 'ionicons/icons';
 import type { CallStatus } from '../hooks/useVideoCall';
 import './VideoCallModal.css';
@@ -31,6 +32,7 @@ interface VideoCallModalProps {
   onHangUp: () => void;
   onToggleMute: () => void;
   onToggleVideo: () => void;
+  onMinimize: () => void;
 }
 
 function formatDuration(seconds: number): string {
@@ -41,8 +43,6 @@ function formatDuration(seconds: number): string {
 
 /**
  * Binds a MediaStream to a <video> element with retry logic.
- * IonModal may delay DOM mounting due to its entrance animation,
- * so we retry after a short delay if the ref isn't available yet.
  */
 function bindStreamToVideo(
   videoRef: React.RefObject<HTMLVideoElement | null>,
@@ -53,18 +53,13 @@ function bindStreamToVideo(
 
   const el = videoRef.current;
   if (el) {
-    // Only assign srcObject if it's not already set to this stream.
-    // Re-assigning srcObject tears down the media pipeline and causes black screens on mobile WebViews.
     if (el.srcObject !== stream) {
       el.srcObject = stream;
     }
-    
-    // Always attempt play() to resume/start playback of newly added tracks
     el.play().catch((err) => {
       console.warn('[Call] Error playing video:', err);
     });
   } else if (retryCount < 5) {
-    // Retry — modal may still be animating into the DOM
     setTimeout(() => {
       bindStreamToVideo(videoRef, stream, retryCount + 1);
     }, 100);
@@ -84,6 +79,7 @@ export default function VideoCallModal({
   onHangUp,
   onToggleMute,
   onToggleVideo,
+  onMinimize,
 }: VideoCallModalProps) {
   const localVideoRef = useRef<HTMLVideoElement>(null);
   const remoteVideoRef = useRef<HTMLVideoElement>(null);
@@ -99,10 +95,8 @@ export default function VideoCallModal({
   useEffect(() => {
     if (!isOpen || !remoteStream) return;
 
-    // Bind initially
     bindStreamToVideo(remoteVideoRef, remoteStream);
 
-    // Re-bind (attempt play) when new tracks are added natively or unmute
     const handleTrackUpdate = () => {
       console.log('[CallModal] Remote stream track update, playing...');
       bindStreamToVideo(remoteVideoRef, remoteStream);
@@ -111,7 +105,6 @@ export default function VideoCallModal({
     remoteStream.addEventListener('addtrack', handleTrackUpdate);
     remoteStream.addEventListener('removetrack', handleTrackUpdate);
 
-    // Also listen to existing tracks in case they unmute/activate
     const tracks = remoteStream.getTracks();
     tracks.forEach((track) => {
       track.addEventListener('unmute', handleTrackUpdate);
@@ -145,11 +138,11 @@ export default function VideoCallModal({
         ? 'Ringing...'
         : callStatus === 'connecting'
           ? 'Connecting...'
-        : callStatus === 'active'
-          ? formatDuration(callDuration)
-          : callStatus === 'ended'
-            ? 'Call ended'
-            : '';
+          : callStatus === 'active'
+            ? formatDuration(callDuration)
+            : callStatus === 'ended'
+              ? 'Call ended'
+              : '';
 
   return (
     <IonModal
@@ -167,6 +160,19 @@ export default function VideoCallModal({
           playsInline
           {...{ 'webkit-playsinline': 'true' } as React.HTMLAttributes<HTMLVideoElement>}
         />
+
+        {/* Minimize Button */}
+        {(callStatus === 'calling' || callStatus === 'connecting' || callStatus === 'active') && (
+          <div className="video-call-top-bar">
+            <button
+              className="video-call-minimize-btn"
+              onClick={onMinimize}
+              aria-label="Minimize call"
+            >
+              <IonIcon icon={chevronDown} />
+            </button>
+          </div>
+        )}
 
         {/* Overlay when remote video not yet connected */}
         {callStatus !== 'active' && (

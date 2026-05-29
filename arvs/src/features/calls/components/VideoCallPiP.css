@@ -1,0 +1,146 @@
+.video-call-pip-container {
+  position: absolute;
+  bottom: 90px;
+  right: 16px;
+  width: 110px;
+  height: 160px;
+  border-radius: 16px;
+  overflow: hidden;
+  z-index: 1000;
+  box-shadow: 0 8px 32px rgba(0, 0, 0, 0.45);
+  border: 1.5px solid rgba(255, 255, 255, 0.2);
+  background: #000;
+  display: flex;
+  flex-direction: column;
+  cursor: grab;
+  user-select: none;
+  -webkit-user-select: none;
+  touch-action: none;
+  animation: pip-entrance 0.4s ease-out;
+}
+
+.video-call-pip-container.dragging {
+  cursor: grabbing;
+  box-shadow: 0 16px 48px rgba(0, 0, 0, 0.65);
+  border-color: rgba(255, 255, 255, 0.4);
+}
+
+.video-call-pip-container:not(.dragging):hover {
+  box-shadow: 0 12px 40px rgba(0, 0, 0, 0.6);
+  border-color: var(--ion-color-primary);
+}
+
+.video-call-pip-remote {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  background: #1a1a2e;
+  z-index: 1;
+}
+
+.video-call-pip-local {
+  position: absolute;
+  top: 8px;
+  right: 8px;
+  width: 32px;
+  height: 45px;
+  border-radius: 6px;
+  object-fit: cover;
+  transform: scaleX(-1);
+  border: 1px solid rgba(255, 255, 255, 0.3);
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.4);
+  z-index: 2;
+  background: #222;
+}
+
+.video-call-pip-overlay {
+  position: absolute;
+  inset: 0;
+  z-index: 3;
+  display: flex;
+  flex-direction: column;
+  justify-content: space-between;
+  padding: 8px;
+  background: linear-gradient(to bottom, rgba(0, 0, 0, 0.3) 0%, transparent 40%, rgba(0, 0, 0, 0.5) 100%);
+  pointer-events: none;
+}
+
+.video-call-pip-status {
+  display: flex;
+  align-items: center;
+}
+
+.video-call-pip-dot {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: #ffb020;
+}
+
+.video-call-pip-dot.active {
+  background: #4ade80;
+  animation: pip-blink 1.5s ease-in-out infinite;
+}
+
+.video-call-pip-controls {
+  display: flex;
+  justify-content: space-between;
+  gap: 8px;
+  width: 100%;
+  pointer-events: auto;
+}
+
+.video-call-pip-btn {
+  width: 28px;
+  height: 28px;
+  border-radius: 50%;
+  border: none;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 14px;
+  color: #fff;
+  background: rgba(255, 255, 255, 0.2);
+  backdrop-filter: blur(8px);
+  -webkit-backdrop-filter: blur(8px);
+  cursor: pointer;
+  transition: background 0.2s, transform 0.15s;
+}
+
+.video-call-pip-btn:active {
+  transform: scale(0.9);
+}
+
+.video-call-pip-btn-maximize:hover {
+  background: rgba(255, 255, 255, 0.4);
+}
+
+.video-call-pip-btn-hangup {
+  background: #ef4444;
+  font-size: 14px;
+  transform: rotate(135deg);
+}
+
+.video-call-pip-btn-hangup:hover {
+  background: #dc2626;
+}
+
+@keyframes pip-entrance {
+  from {
+    opacity: 0;
+    transform: scale(0.8) translateY(20px);
+  }
+  to {
+    opacity: 1;
+    transform: scale(1) translateY(0);
+  }
+}
+
+@keyframes pip-blink {
+  0%, 100% {
+    opacity: 1;
+  }
+  50% {
+    opacity: 0.5;
+  }
+}

@@ -1,4 +1,4 @@
-import { useCallback, useMemo, useRef, useState, type CSSProperties } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState, type CSSProperties } from 'react';
 import {
   IonActionSheet,
   IonAlert,
@@ -20,7 +20,7 @@ import { useParams } from 'react-router-dom';
 import Avatar from '../../../components/Avatar';
 import { ChatBubble, MediaPreview, MediaViewerModal, MessageInput } from '../components';
 import ErrorBoundary from '../../../components/ErrorBoundary';
-import { IncomingCallOverlay, VideoCallModal } from '../../calls/components';
+import { IncomingCallOverlay, VideoCallModal, VideoCallPiP } from '../../calls/components';
 import { useVideoCall } from '../../calls/hooks';
 import { useAuth } from '../../auth/hooks';
 import {
@@ -48,6 +48,14 @@ const Chat: React.FC = () => {
   const [presentToast] = useIonToast();
 
   const videoCall = useVideoCall(conversationId, user?.id);
+  const [isCallMinimized, setIsCallMinimized] = useState(false);
+
+  // Reset minimize state when call is idle or ringing
+  useEffect(() => {
+    if (videoCall.callStatus === 'idle' || videoCall.callStatus === 'ringing') {
+      setIsCallMinimized(false);
+    }
+  }, [videoCall.callStatus]);
 
   const [mediaViewer, setMediaViewer] = useState<{ src: string; type: 'image' | 'video' } | null>(null);
   const [showCaptureSheet, setShowCaptureSheet] = useState(false);
@@ -430,10 +438,12 @@ const Chat: React.FC = () => {
 
       <VideoCallModal
         isOpen={
-          videoCall.callStatus === 'calling'
-          || videoCall.callStatus === 'connecting'
-          || videoCall.callStatus === 'active'
-          || videoCall.callStatus === 'ended'
+          !isCallMinimized && (
+            videoCall.callStatus === 'calling'
+            || videoCall.callStatus === 'connecting'
+            || videoCall.callStatus === 'active'
+            || videoCall.callStatus === 'ended'
+          )
         }
         callStatus={videoCall.callStatus}
         localStream={videoCall.localStream}
@@ -446,7 +456,23 @@ const Chat: React.FC = () => {
         onHangUp={videoCall.hangUp}
         onToggleMute={videoCall.toggleMuteAudio}
         onToggleVideo={videoCall.toggleCameraOff}
+        onMinimize={() => setIsCallMinimized(true)}
       />
+
+      {isCallMinimized && (
+        videoCall.callStatus === 'calling'
+        || videoCall.callStatus === 'connecting'
+        || videoCall.callStatus === 'active'
+      ) && (
+        <VideoCallPiP
+          localStream={videoCall.localStream}
+          remoteStream={videoCall.remoteStream}
+          callStatus={videoCall.callStatus}
+          isVideoOff={videoCall.isVideoOff}
+          onMaximize={() => setIsCallMinimized(false)}
+          onHangUp={videoCall.hangUp}
+        />
+      )}
 
       <IncomingCallOverlay
         isOpen={videoCall.callStatus === 'ringing'}
