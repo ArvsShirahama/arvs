@@ -1,0 +1,29 @@
+{
+  "project_info": {
+    "project_number": "1019985107734",
+    "project_id": "arvs-chat",
+    "storage_bucket": "arvs-chat.firebasestorage.app"
+  },
+  "client": [
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:1019985107734:android:9fcb13d4254127f02a0e37",
+        "android_client_info": {
+          "package_name": "com.arvin.arvs"
+        }
+      },
+      "oauth_client": [],
+      "api_key": [
+        {
+          "current_key": "AIzaSyCsaJbfl0pf4Q4Z-3pnOLnk-69l5z3PTaU"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": []
+        }
+      }
+    }
+  ],
+  "configuration_version": "1"
+}
