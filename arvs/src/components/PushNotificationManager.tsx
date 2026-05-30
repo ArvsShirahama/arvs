@@ -23,6 +23,21 @@ const CHAT_NOTIFICATION_CHANNEL = {
   lightColor: '#ff6b6b',
 };
 
+const CALL_NOTIFICATION_CHANNEL = {
+  id: 'incoming-calls',
+  name: 'Incoming Calls',
+  description: 'Ringing for incoming voice and video calls',
+  importance: 5 as const,
+  visibility: 1 as const,
+  vibration: true,
+  lights: true,
+  lightColor: '#22c55e',
+};
+
+function isIncomingCall(notification: PushNotificationSchema): boolean {
+  return notification.data?.type === 'incoming_call';
+}
+
 function getConversationRoute(notification: PushNotificationSchema): string | null {
   const route = notification.data?.route;
   if (typeof route === 'string' && route.startsWith('/')) {
@@ -65,6 +80,7 @@ export default function PushNotificationManager() {
     const setup = async () => {
       console.log('[Push] Setting up listeners...');
       await PushNotifications.createChannel(CHAT_NOTIFICATION_CHANNEL);
+      await PushNotifications.createChannel(CALL_NOTIFICATION_CHANNEL);
 
       handles.push(
         await PushNotifications.addListener('registration', async (token) => {
@@ -96,6 +112,24 @@ export default function PushNotificationManager() {
       handles.push(
         await PushNotifications.addListener('pushNotificationReceived', async (notification) => {
           const route = getConversationRoute(notification);
+
+          // Incoming call: navigate to the conversation so useVideoCall picks up
+          // the WebRTC offer arriving over the realtime signaling channel and
+          // shows the ringing overlay. The realtime broadcast carries the actual
+          // call data; the push just wakes the app and routes us there.
+          if (isIncomingCall(notification)) {
+            if (route && currentPathRef.current !== route) {
+              router.push(route, 'forward');
+            }
+            await presentToast({
+              message: `${notification.title || 'Incoming call'}`,
+              duration: 3000,
+              position: 'top',
+              color: 'success',
+            });
+            return;
+          }
+
           if (!route || route === currentPathRef.current) {
             return;
           }
@@ -116,6 +150,8 @@ export default function PushNotificationManager() {
           }
 
           await PushNotifications.removeAllDeliveredNotifications();
+          // Both chat and call taps route to the conversation. For calls, the
+          // ringing overlay appears once the realtime offer is received.
           if (currentPathRef.current !== route) {
             router.push(route, 'forward');
           }

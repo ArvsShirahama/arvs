@@ -23,6 +23,7 @@ import {
   callSoundManager,
 } from '../services';
 import type { SignalPayload } from '../services';
+import { sendCallPush } from '../../../services/pushService';
 
 
 export type CallStatus = 'idle' | 'calling' | 'ringing' | 'connecting' | 'active' | 'ended';
@@ -381,6 +382,13 @@ export function useVideoCall(conversationId: string, localUserId: string | undef
       activeCallIdRef.current = callId;
       setLocalStream(ls);
       setRemoteStream(rs);
+
+      // Wake the callee's device with a high-priority push so they ring even
+      // if their app is backgrounded or closed. Fire-and-forget — a failure
+      // here must not interrupt the in-progress WebRTC call.
+      void sendCallPush(conversationId, callId, true).catch((err) => {
+        console.warn('[Call] Failed to dispatch call push:', err);
+      });
     } catch (err) {
       console.error('[Call] Failed to start call:', err);
       setCallStatus('idle');

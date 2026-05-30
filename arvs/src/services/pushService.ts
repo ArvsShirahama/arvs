@@ -57,3 +57,21 @@ export async function sendChatPush(messageId: string): Promise<void> {
   console.log('[Push] Edge Function response:', JSON.stringify(data));
 }
 
+export async function sendCallPush(
+  conversationId: string,
+  callId: string,
+  video = true
+): Promise<void> {
+  console.log('[Push] Invoking send-call-push for conversation:', conversationId, 'call:', callId);
+  const { data, error } = await supabase.functions.invoke('send-call-push', {
+    body: { conversationId, callId, video },
+  });
+
+  if (error) {
+    console.error('[Push] Call push Edge Function error:', error.message, error);
+    throw error;
+  }
+
+  console.log('[Push] Call push Edge Function response:', JSON.stringify(data));
+}
+
