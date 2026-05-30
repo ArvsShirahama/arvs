@@ -10,6 +10,25 @@
  */
 
 import { supabase } from '../../../supabaseClient';
+import { registerPlugin, Capacitor } from '@capacitor/core';
+import { getStoredPipEnabled, onPipModeChange } from '../../../services/pipService';
+
+interface AndroidPiPPlugin {
+  setCallActive(options: { active: boolean }): Promise<void>;
+  enterPiP(): Promise<void>;
+}
+
+const AndroidPiP = Capacitor.isNativePlatform() && Capacitor.getPlatform() === 'android'
+  ? registerPlugin<AndroidPiPPlugin>('AndroidPiP')
+  : null;
+
+export function triggerNativePiP(): void {
+  if (AndroidPiP) {
+    AndroidPiP.enterPiP().catch((err) => {
+      console.warn('[AndroidPiP] Failed to enter native PiP:', err);
+    });
+  }
+}
 
 export type SignalType =
   | 'offer'
@@ -88,6 +107,8 @@ let currentRemoteUserId: string | null = null;
 let currentCallId: string | null = null;
 let disconnectedTimer: ReturnType<typeof setTimeout> | null = null;
 let channelGeneration = 0;
+let currentFacingMode: 'user' | 'environment' = 'user';
+
 
 function getChannelName(conversationId: string): string {
   return `call-signal-${conversationId}`;
@@ -208,10 +229,11 @@ export async function acquireLocalMedia(videoEnabled = true): Promise<MediaStrea
     try {
       const stream = await navigator.mediaDevices.getUserMedia({
         audio: true,
-        video: { facingMode: 'user', width: { ideal: 640 }, height: { ideal: 480 } },
+        video: { facingMode: currentFacingMode, width: { ideal: 640 }, height: { ideal: 480 } },
       });
       localStream = stream;
       return stream;
+
     } catch (err) {
       console.warn('[Call] Camera unavailable, falling back to audio-only:', err);
       const audioOnlyStream = await navigator.mediaDevices.getUserMedia({
@@ -559,6 +581,99 @@ export function toggleVideo(videoOff: boolean): void {
   }
 }
 
+export function getFacingMode(): 'user' | 'environment' {
+  return currentFacingMode;
+}
+
+export async function switchCamera(): Promise<'user' | 'environment'> {
+  if (!localStream) {
+    currentFacingMode = currentFacingMode === 'user' ? 'environment' : 'user';
+    notifyCallStateChange();
+    return currentFacingMode;
+  }
+
+  const newFacingMode = currentFacingMode === 'user' ? 'environment' : 'user';
+  const oldTrack = localStream.getVideoTracks()[0];
+
+  // 1. Stop and remove the old track BEFORE requesting the new one to release the camera hardware resource.
+  // This is crucial on Android/iOS mobile devices to avoid "SourceUnavailableError" or "NotReadableError".
+  if (oldTrack) {
+    oldTrack.stop();
+    localStream.removeTrack(oldTrack);
+  }
+
+  let tempStream: MediaStream;
+  try {
+    // 2. Try to request a new stream using facingMode constraint
+    tempStream = await navigator.mediaDevices.getUserMedia({
+      audio: false,
+      video: { facingMode: newFacingMode, width: { ideal: 640 }, height: { ideal: 480 } },
+    });
+  } catch (err) {
+    console.warn('[Call] Failed to switch camera using facingMode, trying enumerateDevices...', err);
+    try {
+      // 3. Fallback: Enumerate devices to find a different video input device explicitly
+      const devices = await navigator.mediaDevices.enumerateDevices();
+      const videoDevices = devices.filter((d) => d.kind === 'videoinput');
+      
+      if (videoDevices.length > 1) {
+        const currentTrackSettings = oldTrack ? oldTrack.getSettings() : null;
+        const currentDeviceId = currentTrackSettings?.deviceId;
+        
+        let targetDevice = videoDevices.find((d) => d.deviceId !== currentDeviceId);
+        if (!targetDevice) {
+          targetDevice = videoDevices[1]; // Fallback to second device
+        }
+
+        tempStream = await navigator.mediaDevices.getUserMedia({
+          audio: false,
+          video: { deviceId: { exact: targetDevice.deviceId }, width: { ideal: 640 }, height: { ideal: 480 } },
+        });
+      } else {
+        throw err;
+      }
+    } catch (fallbackErr) {
+      console.error('[Call] Camera switch fallback failed, recovering original facing mode...', fallbackErr);
+      try {
+        tempStream = await navigator.mediaDevices.getUserMedia({
+          audio: false,
+          video: { facingMode: currentFacingMode, width: { ideal: 640 }, height: { ideal: 480 } },
+        });
+      } catch (recoverErr) {
+        console.error('[Call] Failed to recover original camera track:', recoverErr);
+        notifyCallStateChange();
+        return currentFacingMode;
+      }
+    }
+  }
+
+  const newTrack = tempStream.getVideoTracks()[0];
+  if (!newTrack) {
+    throw new Error('No video track found in the new stream');
+  }
+
+  // 4. Add the new track to the localStream
+  localStream.addTrack(newTrack);
+
+  // 5. If there is an active peer connection, replace the track in the sender
+  if (peerConnection) {
+    const senders = peerConnection.getSenders();
+    const videoSender = senders.find((sender) => sender.track && sender.track.kind === 'video');
+    if (videoSender) {
+      try {
+        await videoSender.replaceTrack(newTrack);
+      } catch (replaceErr) {
+        console.error('[Call] replaceTrack failed in peer connection:', replaceErr);
+      }
+    }
+  }
+
+  currentFacingMode = newFacingMode;
+  notifyCallStateChange();
+  return currentFacingMode;
+}
+
+
 export function cleanupCall(): void {
   clearDisconnectedTimer();
   stopLocalMedia();
@@ -583,7 +698,9 @@ export function cleanupCall(): void {
   currentRemoteUserId = null;
   _isInAppPiPHidden = false;
   _isNativePiPActive = false;
+  currentFacingMode = 'user';
   notifyCallStateChange();
+
 }
 
 export async function cleanup(): Promise<void> {
@@ -620,6 +737,19 @@ export function notifyCallStateChange(): void {
   if (typeof window !== 'undefined') {
     window.dispatchEvent(new CustomEvent('arvs-call-state-change'));
   }
+
+  if (AndroidPiP) {
+    const active = !!currentCallId && getStoredPipEnabled();
+    AndroidPiP.setCallActive({ active }).catch((err) => {
+      console.warn('[AndroidPiP] Failed to update call active state:', err);
+    });
+  }
+}
+
+if (typeof window !== 'undefined') {
+  onPipModeChange(() => {
+    notifyCallStateChange();
+  });
 }
 
 let _isCallModalOpen = false;
@@ -663,6 +793,7 @@ export interface ActiveCallState {
   isModalOpen: boolean;
   isInAppPiPHidden: boolean;
   isNativePiPActive: boolean;
+  facingMode: 'user' | 'environment';
 }
 
 export function getActiveCallState(): ActiveCallState {
@@ -676,7 +807,9 @@ export function getActiveCallState(): ActiveCallState {
     isModalOpen: _isCallModalOpen,
     isInAppPiPHidden: _isInAppPiPHidden,
     isNativePiPActive: _isNativePiPActive,
+    facingMode: currentFacingMode,
   };
 }
+
 
 

@@ -7,7 +7,7 @@ const corsHeaders = {
 
 const SUPABASE_URL = Deno.env.get('SUPABASE_URL') ?? '';
 const SUPABASE_ANON_KEY = Deno.env.get('SUPABASE_ANON_KEY') ?? '';
-const SERVICE_ROLE_KEY = Deno.env.get('SERVICE_ROLE_KEY') ?? '';
+const SERVICE_ROLE_KEY = Deno.env.get('SERVICE_ROLE_KEY') ?? Deno.env.get('SUPABASE_SERVICE_ROLE_KEY') ?? '';
 const FIREBASE_PROJECT_ID = Deno.env.get('FIREBASE_PROJECT_ID') ?? '';
 const FIREBASE_CLIENT_EMAIL = Deno.env.get('FIREBASE_CLIENT_EMAIL') ?? '';
 const FIREBASE_PRIVATE_KEY = (Deno.env.get('FIREBASE_PRIVATE_KEY') ?? '').replace(/\\n/g, '\n');
@@ -131,6 +131,7 @@ Deno.serve(async (req) => {
   try {
     const authHeader = req.headers.get('Authorization');
     if (!authHeader) {
+      console.error('[send-chat-push] Missing authorization header.');
       return jsonResponse({ error: 'Missing authorization header.' }, 401);
     }
 
@@ -148,11 +149,14 @@ Deno.serve(async (req) => {
     } = await authedClient.auth.getUser();
 
     if (authError || !user) {
+      console.error('[send-chat-push] Auth error or user not found:', authError);
       return jsonResponse({ error: 'Unauthorized.' }, 401);
     }
 
     const { messageId } = await req.json();
+    console.log(`[send-chat-push] Request received from user ${user.id} for messageId: ${messageId}`);
     if (!messageId || typeof messageId !== 'string') {
+      console.error('[send-chat-push] Invalid messageId parameter');
       return jsonResponse({ error: 'messageId is required.' }, 400);
     }
 
@@ -165,10 +169,12 @@ Deno.serve(async (req) => {
       .single();
 
     if (messageError || !message) {
+      console.error(`[send-chat-push] Message not found: ${messageId}`, messageError);
       return jsonResponse({ error: 'Message not found.' }, 404);
     }
 
     if (message.sender_id !== user.id) {
+      console.error(`[send-chat-push] Sender mismatch: message sender is ${message.sender_id}, requester is ${user.id}`);
       return jsonResponse({ error: 'You can only notify for your own messages.' }, 403);
     }
 
@@ -186,7 +192,9 @@ Deno.serve(async (req) => {
     ]);
 
     const recipientIds = participants?.map((item) => item.user_id) ?? [];
+    console.log(`[send-chat-push] Conversation recipients (excluding sender):`, recipientIds);
     if (recipientIds.length === 0) {
+      console.log('[send-chat-push] Skipped: No recipients found in conversation.');
       return jsonResponse({ delivered: 0, skipped: 'No recipients found.' });
     }
 
@@ -195,7 +203,9 @@ Deno.serve(async (req) => {
       .select('token, user_id')
       .in('user_id', recipientIds);
 
+    console.log(`[send-chat-push] Found ${tokens?.length ?? 0} registered push tokens for recipients.`);
     if (!tokens?.length) {
+      console.log('[send-chat-push] Skipped: No registered recipient devices.');
       return jsonResponse({ delivered: 0, skipped: 'No registered recipient devices.' });
     }
 
@@ -204,7 +214,8 @@ Deno.serve(async (req) => {
     const body = buildMessageBody(message);
     const endpoint = `https://fcm.googleapis.com/v1/projects/${FIREBASE_PROJECT_ID}/messages:send`;
 
-    const results = await Promise.all(tokens.map(async ({ token }) => {
+    const results = await Promise.all(tokens.map(async ({ token, user_id }) => {
+      console.log(`[send-chat-push] Attempting to send FCM message to user ${user_id} token: ${token.substring(0, 15)}...`);
       const response = await fetch(endpoint, {
         method: 'POST',
         headers: {
@@ -239,24 +250,29 @@ Deno.serve(async (req) => {
 
       const payload = await response.json();
       if (!response.ok) {
+        console.error(`[send-chat-push] FCM error for token: ${token.substring(0, 15)}...`, payload);
         const payloadString = JSON.stringify(payload);
         if (payloadString.includes('UNREGISTERED') || payloadString.includes('registration-token-not-registered')) {
+          console.log(`[send-chat-push] Deleting stale/unregistered token: ${token.substring(0, 15)}...`);
           await adminClient.from('push_tokens').delete().eq('token', token);
         }
         return { ok: false, token, payload };
       }
 
+      console.log(`[send-chat-push] FCM success for token: ${token.substring(0, 15)}...`, payload);
       return { ok: true, token, payload };
     }));
 
     const delivered = results.filter((item) => item.ok).length;
     const failed = results.filter((item) => !item.ok);
 
+    console.log(`[send-chat-push] Finished processing. Delivered: ${delivered}, Failed: ${failed.length}`);
     return jsonResponse({
       delivered,
       failed,
     });
   } catch (error) {
+    console.error('[send-chat-push] Unexpected exception:', error);
     return jsonResponse({ error: error instanceof Error ? error.message : 'Unexpected error.' }, 500);
   }
 });

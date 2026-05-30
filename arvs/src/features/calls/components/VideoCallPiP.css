@@ -145,3 +145,20 @@
     opacity: 0.5;
   }
 }
+
+/* Native Android PiP Style Overrides */
+body.native-pip-active .video-call-pip-container {
+  inset: 0 !important;
+  width: 100% !important;
+  height: 100% !important;
+  border-radius: 0 !important;
+  border: none !important;
+  transform: none !important;
+  position: absolute !important;
+}
+
+body.native-pip-active .video-call-pip-controls,
+body.native-pip-active .video-call-pip-local,
+body.native-pip-active .video-call-pip-status {
+  display: none !important;
+}

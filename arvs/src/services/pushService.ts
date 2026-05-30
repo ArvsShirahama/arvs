@@ -44,11 +44,16 @@ export async function removePushTokenRegistration(token: string | null): Promise
 }
 
 export async function sendChatPush(messageId: string): Promise<void> {
-  const { error } = await supabase.functions.invoke('send-chat-push', {
+  console.log('[Push] Invoking send-chat-push for messageId:', messageId);
+  const { data, error } = await supabase.functions.invoke('send-chat-push', {
     body: { messageId },
   });
 
   if (error) {
+    console.error('[Push] Edge Function error:', error.message, error);
     throw error;
   }
+
+  console.log('[Push] Edge Function response:', JSON.stringify(data));
 }
+

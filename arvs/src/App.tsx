@@ -14,12 +14,24 @@ import {
 import { IonReactRouter } from '@ionic/react-router';
 import { chatbubblesOutline, personOutline } from 'ionicons/icons';
 import { useAuth } from './features/auth/hooks';
+import { registerPlugin, Capacitor } from '@capacitor/core';
 
 import PushNotificationManager from './components/PushNotificationManager';
 import GlobalActiveCallBanner from './components/GlobalActiveCallBanner';
 import GlobalVideoCallPiP from './components/GlobalVideoCallPiP';
 import { initializeThemeMode } from './services/themeService';
 import { LoginPage, SignUpPage } from './features/auth/pages';
+
+interface AndroidPiPPlugin {
+  addListener(
+    eventName: 'pipModeChanged',
+    listenerFunc: (data: { inPiP: boolean }) => void
+  ): Promise<any>;
+}
+
+const AndroidPiP = Capacitor.isNativePlatform() && Capacitor.getPlatform() === 'android'
+  ? registerPlugin<AndroidPiPPlugin>('AndroidPiP')
+  : null;
 import {
   ChatListPage,
   ChatPage,
@@ -64,6 +76,29 @@ const App: React.FC = () => {
 
   useEffect(() => {
     initializeThemeMode();
+  }, []);
+
+  useEffect(() => {
+    if (!AndroidPiP) return;
+
+    let handle: any = null;
+    const initListener = async () => {
+      handle = await AndroidPiP.addListener('pipModeChanged', (data) => {
+        if (data.inPiP) {
+          document.body.classList.add('native-pip-active');
+        } else {
+          document.body.classList.remove('native-pip-active');
+        }
+      });
+    };
+
+    void initListener();
+
+    return () => {
+      if (handle) {
+        handle.remove();
+      }
+    };
   }, []);
 
   if (loading) {

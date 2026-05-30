@@ -8,6 +8,7 @@
 
 import { useEffect, useRef, useCallback } from 'react';
 import { IonIcon, IonModal } from '@ionic/react';
+import { Capacitor } from '@capacitor/core';
 import {
   call as callIcon,
   mic,
@@ -16,9 +17,11 @@ import {
   videocamOff,
   chevronDown,
   tvOutline,
+  cameraReverse,
 } from 'ionicons/icons';
 import type { CallStatus } from '../hooks/useVideoCall';
 import './VideoCallModal.css';
+
 
 interface VideoCallModalProps {
   isOpen: boolean;
@@ -35,7 +38,10 @@ interface VideoCallModalProps {
   onToggleVideo: () => void;
   onMinimize: () => void;
   onTriggerPiP?: () => void;
+  onSwitchCamera?: () => void;
+  facingMode?: 'user' | 'environment';
 }
+
 
 function formatDuration(seconds: number): string {
   const mins = Math.floor(seconds / 60);
@@ -83,7 +89,10 @@ export default function VideoCallModal({
   onToggleVideo,
   onMinimize,
   onTriggerPiP,
+  onSwitchCamera,
+  facingMode = 'user',
 }: VideoCallModalProps) {
+
   const localVideoRef = useRef<HTMLVideoElement>(null);
   const remoteVideoRef = useRef<HTMLVideoElement>(null);
 
@@ -174,7 +183,8 @@ export default function VideoCallModal({
             >
               <IonIcon icon={chevronDown} />
             </button>
-            {typeof document !== 'undefined' && 'pictureInPictureEnabled' in document && document.pictureInPictureEnabled && onTriggerPiP && (
+            {((typeof document !== 'undefined' && 'pictureInPictureEnabled' in document && document.pictureInPictureEnabled) || 
+              (Capacitor.isNativePlatform() && Capacitor.getPlatform() === 'android')) && onTriggerPiP && (
               <button
                 className="video-call-minimize-btn video-call-pip-btn"
                 onClick={onTriggerPiP}
@@ -255,7 +265,18 @@ export default function VideoCallModal({
           >
             <IonIcon icon={isVideoOff ? videocamOff : videocam} />
           </button>
+
+          {!isVideoOff && onSwitchCamera && (callStatus === 'active' || callStatus === 'connecting' || callStatus === 'calling') && (
+            <button
+              className="video-call-btn"
+              onClick={onSwitchCamera}
+              aria-label="Switch camera"
+            >
+              <IonIcon icon={cameraReverse} />
+            </button>
+          )}
         </div>
+
       </div>
     </IonModal>
   );

@@ -248,3 +248,20 @@
     opacity: 0.4;
   }
 }
+
+/* Native Android PiP Style Overrides */
+body.native-pip-active .video-call-top-bar,
+body.native-pip-active .video-call-status-bar,
+body.native-pip-active .video-call-local-wrap,
+body.native-pip-active .video-call-controls {
+  display: none !important;
+}
+
+/* Switch camera button micro-feedback */
+.video-call-btn ion-icon {
+  transition: transform 0.35s cubic-bezier(0.4, 0, 0.2, 1);
+}
+.video-call-btn:active ion-icon {
+  transform: rotate(180deg);
+}
+

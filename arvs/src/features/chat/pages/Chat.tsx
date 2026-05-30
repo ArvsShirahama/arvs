@@ -23,7 +23,8 @@ import ErrorBoundary from '../../../components/ErrorBoundary';
 import { IncomingCallOverlay, VideoCallModal } from '../../calls/components';
 import { useVideoCall } from '../../calls/hooks';
 import { useAuth } from '../../auth/hooks';
-import { getActiveCallState, setCallModalOpen } from '../../calls/services';
+import { getActiveCallState, setCallModalOpen, triggerNativePiP } from '../../calls/services';
+import { Capacitor } from '@capacitor/core';
 import {
   useChatRealtime,
   useMediaCapture,
@@ -65,8 +66,12 @@ const Chat: React.FC = () => {
   }, []);
 
   const handleManualPiP = useCallback(() => {
-    // Dispatch custom event to enter native Picture-in-Picture on the persistent video element
-    window.dispatchEvent(new CustomEvent('arvs-trigger-native-pip'));
+    if (Capacitor.isNativePlatform() && Capacitor.getPlatform() === 'android') {
+      triggerNativePiP();
+    } else {
+      // Dispatch custom event to enter native Picture-in-Picture on the persistent video element
+      window.dispatchEvent(new CustomEvent('arvs-trigger-native-pip'));
+    }
   }, []);
 
   const [mediaViewer, setMediaViewer] = useState<{ src: string; type: 'image' | 'video' } | null>(null);
@@ -468,7 +473,10 @@ const Chat: React.FC = () => {
         onToggleVideo={videoCall.toggleCameraOff}
         onMinimize={() => setCallModalOpen(false)}
         onTriggerPiP={handleManualPiP}
+        onSwitchCamera={videoCall.flipCamera}
+        facingMode={videoCall.facingMode}
       />
+
 
       <IncomingCallOverlay
         isOpen={videoCall.callStatus === 'ringing'}

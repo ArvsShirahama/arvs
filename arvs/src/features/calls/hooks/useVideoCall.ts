@@ -6,6 +6,8 @@
  */
 
 import { useCallback, useEffect, useRef, useState } from 'react';
+import { Capacitor } from '@capacitor/core';
+import { Haptics } from '@capacitor/haptics';
 import {
   acceptCall,
   cleanupCall,
@@ -17,8 +19,11 @@ import {
   toggleVideo,
   getActiveCallState,
   setCallModalOpen,
+  switchCamera,
+  callSoundManager,
 } from '../services';
 import type { SignalPayload } from '../services';
+
 
 export type CallStatus = 'idle' | 'calling' | 'ringing' | 'connecting' | 'active' | 'ended';
 
@@ -37,13 +42,16 @@ export interface UseVideoCallReturn {
   isMuted: boolean;
   isVideoOff: boolean;
   callDuration: number;
+  facingMode: 'user' | 'environment';
   initiateCall: (remoteUserId: string) => Promise<void>;
   acceptIncomingCall: () => Promise<void>;
   rejectIncomingCall: () => void;
   hangUp: () => void;
   toggleMuteAudio: () => void;
   toggleCameraOff: () => void;
+  flipCamera: () => Promise<void>;
 }
+
 
 const OUTGOING_RING_TIMEOUT_MS = 30_000;
 
@@ -55,6 +63,8 @@ export function useVideoCall(conversationId: string, localUserId: string | undef
   const [isMuted, setIsMuted] = useState(false);
   const [isVideoOff, setIsVideoOff] = useState(false);
   const [callDuration, setCallDuration] = useState(0);
+  const [facingMode, setFacingMode] = useState<'user' | 'environment'>('user');
+
 
   const durationIntervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const unansweredTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -75,6 +85,7 @@ export function useVideoCall(conversationId: string, localUserId: string | undef
       activeCallIdRef.current = activeState.callId;
       setLocalStream(activeState.localStream);
       setRemoteStream(activeState.remoteStream);
+      setFacingMode(activeState.facingMode);
       
       const isConnected =
         activeState.peerConnectionState === 'connected' ||
@@ -83,6 +94,30 @@ export function useVideoCall(conversationId: string, localUserId: string | undef
       setCallModalOpen(true);
     }
   }, [conversationId]);
+
+  // Sync state reactively with global callState changes
+  useEffect(() => {
+    const handleStateChange = () => {
+      const activeState = getActiveCallState();
+      
+      if (activeState.localStream) {
+        setLocalStream(new MediaStream(activeState.localStream.getTracks()));
+      } else {
+        setLocalStream(null);
+      }
+      
+      if (activeState.remoteStream) {
+        setRemoteStream(new MediaStream(activeState.remoteStream.getTracks()));
+      } else {
+        setRemoteStream(null);
+      }
+
+      setFacingMode(activeState.facingMode);
+    };
+    window.addEventListener('arvs-call-state-change', handleStateChange);
+    return () => window.removeEventListener('arvs-call-state-change', handleStateChange);
+  }, []);
+
 
   useEffect(() => {
     callStatusRef.current = callStatus;
@@ -135,6 +170,69 @@ export function useVideoCall(conversationId: string, localUserId: string | undef
 
     return clearUnansweredTimeout;
   }, [callStatus, clearUnansweredTimeout]);
+
+  // Manage ringtone and vibration lifecycles based on callStatus
+  useEffect(() => {
+    let vibeInterval: any = null;
+
+    const canVibrateWeb = () => {
+      if (typeof navigator === 'undefined' || !navigator.vibrate) return false;
+      const ua = (navigator as any).userActivation;
+      if (ua && !ua.hasBeenActive) return false;
+      return true;
+    };
+
+    const triggerVibration = () => {
+      if (Capacitor.isNativePlatform()) {
+        Haptics.vibrate({ duration: 1000 }).catch((err) => {
+          console.warn('[Haptics] Vibration failed:', err);
+        });
+      } else if (canVibrateWeb()) {
+        try {
+          navigator.vibrate([500, 250, 500]);
+        } catch (e) {
+          // ignore web vibration blocks
+        }
+      }
+    };
+
+    if (callStatus === 'ringing') {
+      // Play incoming ringtone
+      callSoundManager.startIncomingRingtone();
+      // Start haptic vibration
+      triggerVibration();
+      vibeInterval = setInterval(triggerVibration, 3000);
+    } else if (callStatus === 'calling' || callStatus === 'connecting') {
+      // Play outgoing ringback tone
+      callSoundManager.startOutgoingRingback();
+    } else {
+      // Stop all sounds and haptics
+      callSoundManager.stopAll();
+      if (canVibrateWeb()) {
+        try {
+          navigator.vibrate(0); // Stop active web vibration
+        } catch (e) {
+          // ignore
+        }
+      }
+    }
+
+    return () => {
+      callSoundManager.stopAll();
+      if (vibeInterval) {
+        clearInterval(vibeInterval);
+      }
+      if (canVibrateWeb()) {
+        try {
+          navigator.vibrate(0);
+        } catch (e) {
+          // ignore
+        }
+      }
+    };
+  }, [callStatus]);
+
+
 
   const resetToEnded = useCallback(() => {
     clearUnansweredTimeout();
@@ -341,6 +439,15 @@ export function useVideoCall(conversationId: string, localUserId: string | undef
     });
   }, []);
 
+  const flipCamera = useCallback(async () => {
+    try {
+      const mode = await switchCamera();
+      setFacingMode(mode);
+    } catch (err) {
+      console.error('[Call] Failed to switch camera:', err);
+    }
+  }, []);
+
   return {
     callStatus,
     localStream,
@@ -349,12 +456,15 @@ export function useVideoCall(conversationId: string, localUserId: string | undef
     isMuted,
     isVideoOff,
     callDuration,
+    facingMode,
     initiateCall,
     acceptIncomingCall,
     rejectIncomingCall,
     hangUp,
     toggleMuteAudio,
     toggleCameraOff,
+    flipCamera,
   };
 }
+
 
