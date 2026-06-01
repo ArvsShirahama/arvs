@@ -11,6 +11,7 @@ import {
   clearStoredPushToken,
   upsertPushTokenRegistration,
 } from '../services/pushService';
+import { handleCallInvitation } from '../features/calls';
 
 const CHAT_NOTIFICATION_CHANNEL = {
   id: 'chat-messages',
@@ -113,16 +114,12 @@ export default function PushNotificationManager() {
         await PushNotifications.addListener('pushNotificationReceived', async (notification) => {
           const route = getConversationRoute(notification);
 
-          // Incoming call: navigate to the conversation so useVideoCall picks up
-          // the WebRTC offer arriving over the realtime signaling channel and
-          // shows the ringing overlay. The realtime broadcast carries the actual
-          // call data; the push just wakes the app and routes us there.
           if (isIncomingCall(notification)) {
-            if (route && currentPathRef.current !== route) {
-              router.push(route, 'forward');
-            }
+            // Foreground receipt: do not automatically route. The global
+            // invitation broadcast channel will handle the WebRTC handshake
+            // and open the ringing overlay.
             await presentToast({
-              message: `${notification.title || 'Incoming call'}`,
+              message: `Incoming call from ${notification.title || 'Someone'}`,
               duration: 3000,
               position: 'top',
               color: 'success',
@@ -150,8 +147,20 @@ export default function PushNotificationManager() {
           }
 
           await PushNotifications.removeAllDeliveredNotifications();
-          // Both chat and call taps route to the conversation. For calls, the
-          // ringing overlay appears once the realtime offer is received.
+
+          if (isIncomingCall(notification)) {
+            const data = notification.data;
+            if (data && data.conversationId && data.callId) {
+              void handleCallInvitation({
+                conversationId: data.conversationId,
+                callId: data.callId,
+                from: data.callerId || '',
+                callerName: data.callerName || 'Someone',
+                callerAvatarUrl: data.callerAvatarUrl || null,
+              });
+            }
+          }
+
           if (currentPathRef.current !== route) {
             router.push(route, 'forward');
           }

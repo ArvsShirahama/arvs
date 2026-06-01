@@ -20,10 +20,9 @@ import { useParams } from 'react-router-dom';
 import Avatar from '../../../components/Avatar';
 import { ChatBubble, MediaPreview, MediaViewerModal, MessageInput } from '../components';
 import ErrorBoundary from '../../../components/ErrorBoundary';
-import { IncomingCallOverlay, VideoCallModal } from '../../calls/components';
-import { useVideoCall } from '../../calls/hooks';
+import { useCall } from '../../calls';
 import { useAuth } from '../../auth/hooks';
-import { getActiveCallState, setCallModalOpen, triggerNativePiP } from '../../calls/services';
+import { getActiveCallState, triggerNativePiP } from '../../calls/services';
 import { Capacitor } from '@capacitor/core';
 import {
   useChatRealtime,
@@ -53,7 +52,7 @@ const Chat: React.FC = () => {
     presentToast({ message, color, duration: 2200, position: 'top' });
   }, [presentToast]);
 
-  const videoCall = useVideoCall(conversationId, user?.id);
+  const videoCall = useCall();
   const [callState, setCallState] = useState(getActiveCallState());
 
   // Listen for global call state changes to control call modal visibility
@@ -268,7 +267,7 @@ const Chat: React.FC = () => {
           <IonButtons slot="end">
             <IonButton
               fill="clear"
-              onClick={() => otherUser && videoCall.initiateCall(otherUser.id)}
+              onClick={() => otherUser && videoCall.initiateCall(conversationId, otherUser.id, displayName, otherUser.avatar_url ?? null)}
               disabled={videoCall.callStatus !== 'idle' || !otherUser}
               aria-label="Video call"
               className="chat-call-btn"
@@ -451,40 +450,7 @@ const Chat: React.FC = () => {
         onClose={() => setMediaViewer(null)}
       />
 
-      <VideoCallModal
-        isOpen={
-          callState.isModalOpen && (
-            videoCall.callStatus === 'calling'
-            || videoCall.callStatus === 'connecting'
-            || videoCall.callStatus === 'active'
-            || videoCall.callStatus === 'ended'
-          )
-        }
-        callStatus={videoCall.callStatus}
-        localStream={videoCall.localStream}
-        remoteStream={videoCall.remoteStream}
-        isMuted={videoCall.isMuted}
-        isVideoOff={videoCall.isVideoOff}
-        callDuration={videoCall.callDuration}
-        remoteName={displayName}
-        remoteAvatarUrl={otherUser?.avatar_url ?? null}
-        onHangUp={videoCall.hangUp}
-        onToggleMute={videoCall.toggleMuteAudio}
-        onToggleVideo={videoCall.toggleCameraOff}
-        onMinimize={() => setCallModalOpen(false)}
-        onTriggerPiP={handleManualPiP}
-        onSwitchCamera={videoCall.flipCamera}
-        facingMode={videoCall.facingMode}
-      />
 
-
-      <IncomingCallOverlay
-        isOpen={videoCall.callStatus === 'ringing'}
-        callerName={displayName}
-        callerAvatarUrl={otherUser?.avatar_url ?? null}
-        onAccept={videoCall.acceptIncomingCall}
-        onReject={videoCall.rejectIncomingCall}
-      />
 
       {/* Delete confirmation alert */}
       <IonAlert

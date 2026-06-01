@@ -12,21 +12,17 @@ import {
   acceptCall,
   cleanupCall,
   endCall,
-  onSignal,
   startCall,
-  subscribeToCallSignals,
   toggleMute,
   toggleVideo,
   getActiveCallState,
   setCallModalOpen,
   switchCamera,
   callSoundManager,
+  type CallStatus,
 } from '../services';
-import type { SignalPayload } from '../services';
 import { sendCallPush } from '../../../services/pushService';
 
-
-export type CallStatus = 'idle' | 'calling' | 'ringing' | 'connecting' | 'active' | 'ended';
 
 export interface IncomingCallInfo {
   callId: string;
@@ -44,7 +40,14 @@ export interface UseVideoCallReturn {
   isVideoOff: boolean;
   callDuration: number;
   facingMode: 'user' | 'environment';
-  initiateCall: (remoteUserId: string) => Promise<void>;
+  remoteName: string | null;
+  remoteAvatarUrl: string | null;
+  initiateCall: (
+    conversationId: string,
+    remoteUserId: string,
+    remoteName: string,
+    remoteAvatarUrl: string | null
+  ) => Promise<void>;
   acceptIncomingCall: () => Promise<void>;
   rejectIncomingCall: () => void;
   hangUp: () => void;
@@ -56,7 +59,7 @@ export interface UseVideoCallReturn {
 
 const OUTGOING_RING_TIMEOUT_MS = 30_000;
 
-export function useVideoCall(conversationId: string, localUserId: string | undefined): UseVideoCallReturn {
+export function useVideoCall(localUserId: string | undefined): UseVideoCallReturn {
   const [callStatus, setCallStatus] = useState<CallStatus>('idle');
   const [localStream, setLocalStream] = useState<MediaStream | null>(null);
   const [remoteStream, setRemoteStream] = useState<MediaStream | null>(null);
@@ -65,6 +68,8 @@ export function useVideoCall(conversationId: string, localUserId: string | undef
   const [isVideoOff, setIsVideoOff] = useState(false);
   const [callDuration, setCallDuration] = useState(0);
   const [facingMode, setFacingMode] = useState<'user' | 'environment'>('user');
+  const [remoteName, setRemoteName] = useState<string | null>(null);
+  const [remoteAvatarUrl, setRemoteAvatarUrl] = useState<string | null>(null);
 
 
   const durationIntervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
@@ -72,41 +77,18 @@ export function useVideoCall(conversationId: string, localUserId: string | undef
   const callStatusRef = useRef<CallStatus>('idle');
   const activeCallIdRef = useRef<string | null>(null);
 
-  // Restore ongoing call state on mount if it matches the current conversationId
-  useEffect(() => {
-    const activeState = getActiveCallState();
-    if (
-      activeState.conversationId === conversationId &&
-      activeState.callId &&
-      (activeState.peerConnectionState === 'connected' ||
-        activeState.peerConnectionState === 'connecting' ||
-        activeState.iceConnectionState === 'connected' ||
-        activeState.iceConnectionState === 'checking')
-    ) {
-      activeCallIdRef.current = activeState.callId;
-      setLocalStream(activeState.localStream);
-      setRemoteStream(activeState.remoteStream);
-      setFacingMode(activeState.facingMode);
-      
-      const isConnected =
-        activeState.peerConnectionState === 'connected' ||
-        activeState.iceConnectionState === 'connected';
-      setCallStatus(isConnected ? 'active' : 'connecting');
-      setCallModalOpen(true);
-    }
-  }, [conversationId]);
 
   // Sync state reactively with global callState changes
   useEffect(() => {
     const handleStateChange = () => {
       const activeState = getActiveCallState();
-      
+
       if (activeState.localStream) {
         setLocalStream(new MediaStream(activeState.localStream.getTracks()));
       } else {
         setLocalStream(null);
       }
-      
+
       if (activeState.remoteStream) {
         setRemoteStream(new MediaStream(activeState.remoteStream.getTracks()));
       } else {
@@ -114,7 +96,26 @@ export function useVideoCall(conversationId: string, localUserId: string | undef
       }
 
       setFacingMode(activeState.facingMode);
+      setRemoteName(activeState.remoteName);
+      setRemoteAvatarUrl(activeState.remoteAvatarUrl);
+      setCallStatus(activeState.callStatus);
+      activeCallIdRef.current = activeState.callId;
+
+      if (activeState.incomingCallInfo) {
+        setIncomingCall({
+          callId: activeState.incomingCallInfo.callId,
+          from: activeState.incomingCallInfo.from,
+          conversationId: activeState.incomingCallInfo.conversationId,
+          offerSdp: activeState.incomingCallInfo.offerSdp,
+        });
+      } else {
+        setIncomingCall(null);
+      }
     };
+
+    // Initialize state
+    handleStateChange();
+
     window.addEventListener('arvs-call-state-change', handleStateChange);
     return () => window.removeEventListener('arvs-call-state-change', handleStateChange);
   }, []);
@@ -158,14 +159,6 @@ export function useVideoCall(conversationId: string, localUserId: string | undef
     unansweredTimeoutRef.current = setTimeout(() => {
       if (callStatusRef.current === 'calling' || callStatusRef.current === 'connecting') {
         void endCall('hangup');
-        cleanupCall();
-        setCallStatus('ended');
-        setIncomingCall(null);
-        setLocalStream(null);
-        setRemoteStream(null);
-        setTimeout(() => {
-          setCallStatus('idle');
-        }, 1200);
       }
     }, OUTGOING_RING_TIMEOUT_MS);
 
@@ -198,20 +191,16 @@ export function useVideoCall(conversationId: string, localUserId: string | undef
     };
 
     if (callStatus === 'ringing') {
-      // Play incoming ringtone
       callSoundManager.startIncomingRingtone();
-      // Start haptic vibration
       triggerVibration();
       vibeInterval = setInterval(triggerVibration, 3000);
     } else if (callStatus === 'calling' || callStatus === 'connecting') {
-      // Play outgoing ringback tone
       callSoundManager.startOutgoingRingback();
     } else {
-      // Stop all sounds and haptics
       callSoundManager.stopAll();
       if (canVibrateWeb()) {
         try {
-          navigator.vibrate(0); // Stop active web vibration
+          navigator.vibrate(0);
         } catch (e) {
           // ignore
         }
@@ -233,143 +222,19 @@ export function useVideoCall(conversationId: string, localUserId: string | undef
     };
   }, [callStatus]);
 
-
-
-  const resetToEnded = useCallback(() => {
-    clearUnansweredTimeout();
-    setCallStatus('ended');
-    setIncomingCall(null);
-    setLocalStream(null);
-    setRemoteStream(null);
-    setIsMuted(false);
-    setIsVideoOff(false);
-    activeCallIdRef.current = null;
-
-    setTimeout(() => {
-      setCallStatus('idle');
-    }, 1500);
-  }, [clearUnansweredTimeout]);
-
-  useEffect(() => {
-    if (!conversationId || !localUserId) return;
-
-    void subscribeToCallSignals(conversationId, localUserId).catch((error) => {
-      console.error('[Call] Failed to subscribe to signaling channel:', error);
-    });
-
-    const unsubscribe = onSignal((signal: SignalPayload) => {
-      switch (signal.type) {
-        case 'offer': {
-          if (!signal.sdp || !signal.callId) return;
-
-          if (callStatusRef.current === 'idle') {
-            activeCallIdRef.current = signal.callId;
-            setIncomingCall({
-              callId: signal.callId,
-              from: signal.from,
-              conversationId: signal.conversationId,
-              offerSdp: signal.sdp,
-            });
-            setCallStatus('ringing');
-          } else {
-            void endCall('busy');
-          }
-          break;
-        }
-
-        case 'answer': {
-          if (signal.callId && activeCallIdRef.current && signal.callId !== activeCallIdRef.current) {
-            return;
-          }
-          if (callStatusRef.current === 'calling') {
-            setCallStatus('connecting');
-          }
-          break;
-        }
-
-        case 'connection-state': {
-          if (signal.callId && activeCallIdRef.current && signal.callId !== activeCallIdRef.current) {
-            return;
-          }
-
-          const iceState = signal.iceConnectionState;
-          const pcState = signal.peerConnectionState;
-
-          if (pcState === 'connected' || iceState === 'connected' || iceState === 'completed') {
-            setCallStatus('active');
-            clearUnansweredTimeout();
-            break;
-          }
-
-          if (pcState === 'connecting' || iceState === 'checking' || iceState === 'new') {
-            // Do NOT downgrade 'active' to 'connecting' — ICE state events can
-            // fire out of order on mobile, and this would make the UI stuck at
-            // "connecting" even though the WebRTC connection is already established.
-            if (callStatusRef.current === 'calling' || callStatusRef.current === 'ringing') {
-              setCallStatus('connecting');
-            }
-            break;
-          }
-
-          if (pcState === 'failed' || iceState === 'failed') {
-            // ICE restart is attempted in callSignaling.ts — don't end the call.
-            // Only transition UI if we aren't already active (avoid downgrade).
-            if (callStatusRef.current === 'active') {
-              // Stay active — ICE restart may recover the connection.
-            } else {
-              setCallStatus('connecting');
-            }
-          } else if (pcState === 'closed') {
-            cleanupCall();
-            resetToEnded();
-          }
-          break;
-        }
-
-        case 'hangup':
-        case 'reject':
-        case 'busy': {
-          if (signal.callId && activeCallIdRef.current && signal.callId !== activeCallIdRef.current) {
-            return;
-          }
-          if (callStatusRef.current !== 'idle' && callStatusRef.current !== 'ended') {
-            cleanupCall();
-            resetToEnded();
-          }
-          break;
-        }
-
-        case 'remote-stream': {
-          if (signal.callId && activeCallIdRef.current && signal.callId !== activeCallIdRef.current) {
-            return;
-          }
-          if (signal.stream) {
-            setRemoteStream(signal.stream);
-          }
-          break;
-        }
-
-        default:
-          break;
-      }
-    });
-
-    return () => {
-      unsubscribe();
-    };
-  }, [conversationId, localUserId, resetToEnded, clearUnansweredTimeout]);
-
   useEffect(() => {
     return () => {
       clearUnansweredTimeout();
-      // Do NOT end the call or cleanup on unmount.
-      // The call should persist even when navigating away from the Chat page
-      // or when the app is backgrounded. Only explicit hangUp() ends the call.
     };
   }, [clearUnansweredTimeout]);
 
-  const initiateCall = useCallback(async (remoteUserId: string) => {
-    if (!localUserId || !conversationId) return;
+  const initiateCall = useCallback(async (
+    conversationId: string,
+    remoteUserId: string,
+    remoteNameVal: string,
+    remoteAvatarVal: string | null
+  ) => {
+    if (!localUserId) return;
 
     try {
       setCallStatus('calling');
@@ -383,9 +248,6 @@ export function useVideoCall(conversationId: string, localUserId: string | undef
       setLocalStream(ls);
       setRemoteStream(rs);
 
-      // Wake the callee's device with a high-priority push so they ring even
-      // if their app is backgrounded or closed. Fire-and-forget — a failure
-      // here must not interrupt the in-progress WebRTC call.
       void sendCallPush(conversationId, callId, true).catch((err) => {
         console.warn('[Call] Failed to dispatch call push:', err);
       });
@@ -394,7 +256,7 @@ export function useVideoCall(conversationId: string, localUserId: string | undef
       setCallStatus('idle');
       cleanupCall();
     }
-  }, [conversationId, localUserId]);
+  }, [localUserId]);
 
   const acceptIncomingCall = useCallback(async () => {
     if (!localUserId || !incomingCall) return;
@@ -423,15 +285,11 @@ export function useVideoCall(conversationId: string, localUserId: string | undef
 
   const rejectIncomingCall = useCallback(() => {
     void endCall('reject');
-    setCallStatus('idle');
-    setIncomingCall(null);
-    activeCallIdRef.current = null;
   }, []);
 
   const hangUp = useCallback(() => {
     void endCall('hangup');
-    resetToEnded();
-  }, [resetToEnded]);
+  }, []);
 
   const toggleMuteAudio = useCallback(() => {
     setIsMuted((prev) => {
@@ -465,6 +323,8 @@ export function useVideoCall(conversationId: string, localUserId: string | undef
     isVideoOff,
     callDuration,
     facingMode,
+    remoteName,
+    remoteAvatarUrl,
     initiateCall,
     acceptIncomingCall,
     rejectIncomingCall,
@@ -474,5 +334,8 @@ export function useVideoCall(conversationId: string, localUserId: string | undef
     flipCamera,
   };
 }
+
+export type { CallStatus };
+
 
 

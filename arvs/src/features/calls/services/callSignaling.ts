@@ -38,7 +38,8 @@ export type SignalType =
   | 'reject'
   | 'busy'
   | 'remote-stream'
-  | 'connection-state';
+  | 'connection-state'
+  | 'join';
 
 export interface SignalPayload {
   type: SignalType;
@@ -51,6 +52,15 @@ export interface SignalPayload {
   stream?: MediaStream;
   peerConnectionState?: RTCPeerConnectionState;
   iceConnectionState?: RTCIceConnectionState;
+}
+
+export interface IncomingCallDetails {
+  callId: string;
+  from: string;
+  conversationId: string;
+  offerSdp: string;
+  callerName: string;
+  callerAvatarUrl: string | null;
 }
 
 export type SignalCallback = (payload: SignalPayload) => void;
@@ -92,6 +102,8 @@ function getRtcConfig(): RTCConfiguration {
   };
 }
 
+export type CallStatus = 'idle' | 'calling' | 'ringing' | 'connecting' | 'active' | 'ended';
+
 let peerConnection: RTCPeerConnection | null = null;
 let localStream: MediaStream | null = null;
 let remoteStream: MediaStream | null = null;
@@ -108,6 +120,14 @@ let currentCallId: string | null = null;
 let disconnectedTimer: ReturnType<typeof setTimeout> | null = null;
 let channelGeneration = 0;
 let currentFacingMode: 'user' | 'environment' = 'user';
+
+let currentCallStatus: CallStatus = 'idle';
+let remoteName: string | null = null;
+let remoteAvatarUrl: string | null = null;
+let localIceCandidates: RTCIceCandidateInit[] = [];
+let incomingCallInfo: IncomingCallDetails | null = null;
+
+let userCallsChannel: ReturnType<typeof supabase.channel> | null = null;
 
 
 function getChannelName(conversationId: string): string {
@@ -134,14 +154,27 @@ function emitConnectionState(
   callId: string,
   pc: RTCPeerConnection
 ): void {
+  const pcState = pc.connectionState;
+  const iceState = pc.iceConnectionState;
+
+  if (pcState === 'connected' || iceState === 'connected' || iceState === 'completed') {
+    currentCallStatus = 'active';
+  } else if (pcState === 'connecting' || iceState === 'checking' || iceState === 'new') {
+    if (currentCallStatus !== 'active' && currentCallStatus !== 'ended') {
+      currentCallStatus = 'connecting';
+    }
+  } else if (pcState === 'closed') {
+    currentCallStatus = 'ended';
+  }
+
   emitSignal({
     type: 'connection-state',
     from: 'system',
     to: localUserId,
     conversationId,
     callId,
-    peerConnectionState: pc.connectionState,
-    iceConnectionState: pc.iceConnectionState,
+    peerConnectionState: pcState,
+    iceConnectionState: iceState,
   });
 }
 
@@ -299,13 +332,15 @@ function createPeerConnection(
 
   pc.onicecandidate = (event) => {
     if (!event.candidate) return;
+    const candidateJson = event.candidate.toJSON();
+    localIceCandidates.push(candidateJson);
     void sendSignal({
       type: 'ice-candidate',
       from: localUserId,
       to: remoteUserId,
       conversationId,
       callId,
-      candidate: event.candidate.toJSON(),
+      candidate: candidateJson,
     });
   };
 
@@ -380,6 +415,102 @@ async function flushPendingCandidates(): Promise<void> {
 
 async function handleIncomingSignal(signal: SignalPayload): Promise<void> {
   switch (signal.type) {
+    case 'offer': {
+      if (!signal.sdp || !signal.callId) return;
+
+      if (currentCallStatus === 'idle') {
+        currentCallId = signal.callId;
+        currentConversationId = signal.conversationId;
+        currentRemoteUserId = signal.from;
+        currentCallStatus = 'ringing';
+
+        // Fetch caller profile information
+        try {
+          const { data: profile } = await supabase
+            .from('profiles')
+            .select('display_name, username, avatar_url')
+            .eq('id', signal.from)
+            .maybeSingle();
+
+          if (profile) {
+            remoteName = profile.display_name || profile.username || 'Someone';
+            remoteAvatarUrl = profile.avatar_url;
+          }
+        } catch (err) {
+          console.warn('[Call] Failed to fetch caller profile:', err);
+        }
+
+        incomingCallInfo = {
+          callId: signal.callId,
+          from: signal.from,
+          conversationId: signal.conversationId,
+          offerSdp: signal.sdp,
+          callerName: remoteName || 'Someone',
+          callerAvatarUrl: remoteAvatarUrl,
+        };
+
+        _isCallModalOpen = true;
+        notifyCallStateChange();
+      } else {
+        // Send busy signal back to the caller
+        const tempChannel = supabase.channel(`call-signal-${signal.conversationId}`);
+        tempChannel.subscribe(async (status) => {
+          if (status === 'SUBSCRIBED') {
+            try {
+              await tempChannel.send({
+                type: 'broadcast',
+                event: 'signal',
+                payload: {
+                  type: 'busy',
+                  from: currentLocalUserId!,
+                  to: signal.from,
+                  conversationId: signal.conversationId,
+                  callId: signal.callId,
+                },
+              });
+            } catch (err) {
+              console.warn('[Call] Failed to send busy response:', err);
+            } finally {
+              setTimeout(() => {
+                void supabase.removeChannel(tempChannel);
+              }, 4000);
+            }
+          }
+        });
+      }
+      break;
+    }
+    case 'join': {
+      if (signal.callId && currentCallId === signal.callId && currentCallStatus === 'calling' && peerConnection) {
+        console.log('[Call] Recipient joined signaling channel, sending offer and accumulated ICE candidates');
+        
+        // Re-send the offer
+        const localDesc = peerConnection.localDescription;
+        if (localDesc && localDesc.type === 'offer') {
+          await sendSignal({
+            type: 'offer',
+            from: currentLocalUserId!,
+            to: currentRemoteUserId!,
+            conversationId: currentConversationId!,
+            callId: currentCallId,
+            sdp: localDesc.sdp,
+          });
+        }
+
+        // Re-send all accumulated ICE candidates
+        for (const candidate of localIceCandidates) {
+          await sendSignal({
+            type: 'ice-candidate',
+            from: currentLocalUserId!,
+            to: currentRemoteUserId!,
+            conversationId: currentConversationId!,
+            callId: currentCallId,
+            candidate,
+          });
+        }
+      }
+      break;
+    }
     case 'answer': {
       if (!currentCallId || signal.callId !== currentCallId) return;
       if (!peerConnection || !signal.sdp) return;
@@ -389,6 +520,9 @@ async function handleIncomingSignal(signal: SignalPayload): Promise<void> {
         );
         isRemoteDescriptionSet = true;
         await flushPendingCandidates();
+
+        currentCallStatus = 'connecting';
+        notifyCallStateChange();
       } catch (err) {
         console.error('[Call] Failed to set remote answer:', err);
       }
@@ -412,6 +546,19 @@ async function handleIncomingSignal(signal: SignalPayload): Promise<void> {
       }
       break;
     }
+    case 'hangup':
+    case 'reject':
+    case 'busy': {
+      if (signal.callId && currentCallId && signal.callId !== currentCallId) return;
+      if (currentCallStatus !== 'idle' && currentCallStatus !== 'ended') {
+        currentCallStatus = 'ended';
+        notifyCallStateChange();
+        setTimeout(() => {
+          cleanupCall();
+        }, 1200);
+      }
+      break;
+    }
     default:
       break;
   }
@@ -422,16 +569,38 @@ export async function startCall(
   localUserId: string,
   remoteUserId: string
 ): Promise<{ callId: string; localStream: MediaStream; remoteStream: MediaStream }> {
+  currentCallStatus = 'calling';
+  currentLocalUserId = localUserId;
+  currentRemoteUserId = remoteUserId;
+  currentConversationId = conversationId;
+  localIceCandidates = [];
+  incomingCallInfo = null;
+
+  // Fetch profiles for displaying caller/callee names and avatars
+  let localName = 'Someone';
+  let localAvatar: string | null = null;
+  try {
+    const [{ data: localProfile }, { data: remoteProfile }] = await Promise.all([
+      supabase.from('profiles').select('display_name, username, avatar_url').eq('id', localUserId).maybeSingle(),
+      supabase.from('profiles').select('display_name, username, avatar_url').eq('id', remoteUserId).maybeSingle(),
+    ]);
+    if (localProfile) {
+      localName = localProfile.display_name || localProfile.username || 'Someone';
+      localAvatar = localProfile.avatar_url;
+    }
+    if (remoteProfile) {
+      remoteName = remoteProfile.display_name || remoteProfile.username || 'Someone';
+      remoteAvatarUrl = remoteProfile.avatar_url;
+    }
+  } catch (err) {
+    console.warn('[Call] Failed to fetch caller/callee profiles:', err);
+  }
+
   await ensureSignalingChannel(conversationId, localUserId);
 
   const callId = crypto.randomUUID();
-  currentRemoteUserId = remoteUserId;
-
   const stream = await acquireLocalMedia();
 
-  // Set currentCallId AFTER createPeerConnection to avoid the race where
-  // handleIncomingSignal buffers candidates into pendingIceCandidates which
-  // createPeerConnection then wipes.
   const pc = createPeerConnection(conversationId, localUserId, remoteUserId, callId);
   currentCallId = callId;
 
@@ -450,6 +619,34 @@ export async function startCall(
     sdp: offer.sdp,
   });
 
+  // Broadcast lightweight invitation on the callee's user-specific channel
+  const inviteChannel = supabase.channel(`user-calls-${remoteUserId}`);
+  inviteChannel.subscribe(async (status) => {
+    if (status === 'SUBSCRIBED') {
+      try {
+        await inviteChannel.send({
+          type: 'broadcast',
+          event: 'invite',
+          payload: {
+            type: 'invite',
+            from: localUserId,
+            to: remoteUserId,
+            conversationId,
+            callId,
+            callerName: localName,
+            callerAvatarUrl: localAvatar,
+          },
+        });
+      } catch (err) {
+        console.warn('[Call] Failed to send user invitation broadcast:', err);
+      } finally {
+        setTimeout(() => {
+          void supabase.removeChannel(inviteChannel);
+        }, 4000);
+      }
+    }
+  });
+
   notifyCallStateChange();
   return { callId, localStream: stream, remoteStream: remoteStream as MediaStream };
 }
@@ -461,6 +658,10 @@ export async function acceptCall(
   callId: string,
   offerSdp: string
 ): Promise<{ callId: string; localStream: MediaStream; remoteStream: MediaStream }> {
+  currentCallStatus = 'connecting';
+  incomingCallInfo = null;
+  localIceCandidates = [];
+
   await ensureSignalingChannel(conversationId, localUserId);
 
   currentCallId = callId;
@@ -519,7 +720,12 @@ export async function endCall(reason: 'hangup' | 'reject' | 'busy' = 'hangup'): 
     }
   }
 
-  cleanupCall();
+  currentCallStatus = 'ended';
+  notifyCallStateChange();
+
+  setTimeout(() => {
+    cleanupCall();
+  }, 1200);
 }
 
 export async function subscribeToCallSignals(
@@ -699,8 +905,15 @@ export function cleanupCall(): void {
   _isInAppPiPHidden = false;
   _isNativePiPActive = false;
   currentFacingMode = 'user';
-  notifyCallStateChange();
 
+  // Reset signaling layer states
+  currentCallStatus = 'idle';
+  remoteName = null;
+  remoteAvatarUrl = null;
+  localIceCandidates = [];
+  incomingCallInfo = null;
+
+  notifyCallStateChange();
 }
 
 export async function cleanup(): Promise<void> {
@@ -794,6 +1007,10 @@ export interface ActiveCallState {
   isInAppPiPHidden: boolean;
   isNativePiPActive: boolean;
   facingMode: 'user' | 'environment';
+  callStatus: CallStatus;
+  remoteName: string | null;
+  remoteAvatarUrl: string | null;
+  incomingCallInfo: IncomingCallDetails | null;
 }
 
 export function getActiveCallState(): ActiveCallState {
@@ -808,7 +1025,112 @@ export function getActiveCallState(): ActiveCallState {
     isInAppPiPHidden: _isInAppPiPHidden,
     isNativePiPActive: _isNativePiPActive,
     facingMode: currentFacingMode,
+    callStatus: currentCallStatus,
+    remoteName,
+    remoteAvatarUrl,
+    incomingCallInfo,
   };
+}
+
+export function subscribeToUserCallInvitations(localUserId: string): void {
+  if (userCallsChannel) {
+    void supabase.removeChannel(userCallsChannel);
+  }
+
+  currentLocalUserId = localUserId;
+
+  userCallsChannel = supabase.channel(`user-calls-${localUserId}`);
+  userCallsChannel.on('broadcast', { event: 'invite' }, async ({ payload }) => {
+    const invite = payload as {
+      type: 'invite';
+      from: string;
+      to: string;
+      conversationId: string;
+      callId: string;
+      callerName: string;
+      callerAvatarUrl: string | null;
+      video: boolean;
+    };
+
+    if (invite.to !== localUserId) return;
+    await handleCallInvitation(invite);
+  });
+
+  userCallsChannel.subscribe();
+}
+
+export function unsubscribeFromUserCallInvitations(): void {
+  if (userCallsChannel) {
+    void supabase.removeChannel(userCallsChannel);
+    userCallsChannel = null;
+  }
+}
+
+export async function handleCallInvitation(invite: {
+  conversationId: string;
+  callId: string;
+  from: string;
+  callerName: string;
+  callerAvatarUrl: string | null;
+}): Promise<void> {
+  if (currentCallStatus !== 'idle') {
+    // Busy! Send busy signal back to caller on their conversation channel
+    const tempChannel = supabase.channel(`call-signal-${invite.conversationId}`);
+    tempChannel.subscribe(async (status) => {
+      if (status === 'SUBSCRIBED') {
+        try {
+          await tempChannel.send({
+            type: 'broadcast',
+            event: 'signal',
+            payload: {
+              type: 'busy',
+              from: currentLocalUserId!,
+              to: invite.from,
+              conversationId: invite.conversationId,
+              callId: invite.callId,
+            },
+          });
+        } catch (err) {
+          console.warn('[Call] Failed to send busy notification:', err);
+        } finally {
+          setTimeout(() => {
+            void supabase.removeChannel(tempChannel);
+          }, 4000);
+        }
+      }
+    });
+    return;
+  }
+
+  console.log('[Call] Global call invitation received. Joining signaling...');
+  currentCallId = invite.callId;
+  currentConversationId = invite.conversationId;
+  currentRemoteUserId = invite.from;
+  remoteName = invite.callerName;
+  remoteAvatarUrl = invite.callerAvatarUrl;
+
+  await subscribeToCallSignals(invite.conversationId, currentLocalUserId!);
+
+  await sendSignal({
+    type: 'join',
+    from: currentLocalUserId!,
+    to: invite.from,
+    conversationId: invite.conversationId,
+    callId: invite.callId,
+  });
+
+  currentCallStatus = 'ringing';
+  incomingCallInfo = {
+    callId: invite.callId,
+    from: invite.from,
+    conversationId: invite.conversationId,
+    offerSdp: '',
+    callerName: invite.callerName,
+    callerAvatarUrl: invite.callerAvatarUrl,
+  };
+
+  _isCallModalOpen = true;
+  notifyCallStateChange();
 }
 
 

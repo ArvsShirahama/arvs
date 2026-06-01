@@ -1,4 +1,4 @@
-import { useEffect } from 'react';
+import { useEffect, useState } from 'react';
 import { Redirect, Route } from 'react-router-dom';
 import {
   IonApp,
@@ -21,6 +21,18 @@ import GlobalActiveCallBanner from './components/GlobalActiveCallBanner';
 import GlobalVideoCallPiP from './components/GlobalVideoCallPiP';
 import { initializeThemeMode } from './services/themeService';
 import { LoginPage, SignUpPage } from './features/auth/pages';
+import {
+  CallProvider,
+  useCall,
+  IncomingCallOverlay,
+  VideoCallModal,
+  subscribeToUserCallInvitations,
+  unsubscribeFromUserCallInvitations,
+  cleanup,
+  getActiveCallState,
+  setCallModalOpen,
+  triggerNativePiP,
+} from './features/calls';
 
 interface AndroidPiPPlugin {
   addListener(
@@ -79,6 +91,20 @@ const App: React.FC = () => {
   }, []);
 
   useEffect(() => {
+    const userId = session?.user?.id;
+    if (userId) {
+      subscribeToUserCallInvitations(userId);
+      return () => {
+        unsubscribeFromUserCallInvitations();
+        void cleanup();
+      };
+    } else {
+      unsubscribeFromUserCallInvitations();
+      void cleanup();
+    }
+  }, [session?.user?.id]);
+
+  useEffect(() => {
     if (!AndroidPiP) return;
 
     let handle: any = null;
@@ -114,61 +140,123 @@ const App: React.FC = () => {
   return (
     <IonApp>
       <IonReactRouter>
-        <PushNotificationManager />
-        <GlobalActiveCallBanner />
-        <GlobalVideoCallPiP />
-        <IonRouterOutlet>
-          {/* Auth routes */}
-          <Route exact path="/login">
-            {session ? <Redirect to="/tabs/chats" /> : <LoginPage />}
-          </Route>
-          <Route exact path="/signup">
-            {session ? <Redirect to="/tabs/chats" /> : <SignUpPage />}
-          </Route>
+        <CallProvider localUserId={session?.user?.id}>
+          <PushNotificationManager />
+          <GlobalActiveCallBanner />
+          <GlobalVideoCallPiP />
+          <GlobalCallRenderer />
+          <IonRouterOutlet>
+            {/* Auth routes */}
+            <Route exact path="/login">
+              {session ? <Redirect to="/tabs/chats" /> : <LoginPage />}
+            </Route>
+            <Route exact path="/signup">
+              {session ? <Redirect to="/tabs/chats" /> : <SignUpPage />}
+            </Route>
 
-          {/* Chat detail (outside tabs so tab bar is hidden) */}
-          <Route exact path="/chat/:conversationId">
-            {session ? <ChatPage /> : <Redirect to="/login" />}
-          </Route>
-          <Route exact path="/chat/:conversationId/settings">
-            {session ? <ConversationSettingsPage /> : <Redirect to="/login" />}
-          </Route>
-          <Route exact path="/chat/:conversationId/media">
-            {session ? <ConversationMediaPage /> : <Redirect to="/login" />}
-          </Route>
+            {/* Chat detail (outside tabs so tab bar is hidden) */}
+            <Route exact path="/chat/:conversationId">
+              {session ? <ChatPage /> : <Redirect to="/login" />}
+            </Route>
+            <Route exact path="/chat/:conversationId/settings">
+              {session ? <ConversationSettingsPage /> : <Redirect to="/login" />}
+            </Route>
+            <Route exact path="/chat/:conversationId/media">
+              {session ? <ConversationMediaPage /> : <Redirect to="/login" />}
+            </Route>
 
-          {/* Tab routes */}
-          <Route path="/tabs">
-            {session ? (
-              <IonTabs>
-                <IonRouterOutlet>
-                  <Route exact path="/tabs/chats" component={ChatListPage} />
-                  <Route exact path="/tabs/profile" component={ProfilePage} />
-                  <Redirect exact from="/tabs" to="/tabs/chats" />
-                </IonRouterOutlet>
-                <IonTabBar slot="bottom">
-                  <IonTabButton tab="chats" href="/tabs/chats">
-                    <IonIcon icon={chatbubblesOutline} />
-                    <IonLabel>Chats</IonLabel>
-                  </IonTabButton>
-                  <IonTabButton tab="profile" href="/tabs/profile">
-                    <IonIcon icon={personOutline} />
-                    <IonLabel>Profile</IonLabel>
-                  </IonTabButton>
-                </IonTabBar>
-              </IonTabs>
-            ) : (
-              <Redirect to="/login" />
-            )}
-          </Route>
+            {/* Tab routes */}
+            <Route path="/tabs">
+              {session ? (
+                <IonTabs>
+                  <IonRouterOutlet>
+                    <Route exact path="/tabs/chats" component={ChatListPage} />
+                    <Route exact path="/tabs/profile" component={ProfilePage} />
+                    <Redirect exact from="/tabs" to="/tabs/chats" />
+                  </IonRouterOutlet>
+                  <IonTabBar slot="bottom">
+                    <IonTabButton tab="chats" href="/tabs/chats">
+                      <IonIcon icon={chatbubblesOutline} />
+                      <IonLabel>Chats</IonLabel>
+                    </IonTabButton>
+                    <IonTabButton tab="profile" href="/tabs/profile">
+                      <IonIcon icon={personOutline} />
+                      <IonLabel>Profile</IonLabel>
+                    </IonTabButton>
+                  </IonTabBar>
+                </IonTabs>
+              ) : (
+                <Redirect to="/login" />
+              )}
+            </Route>
 
-          {/* Default redirect */}
-          <Route exact path="/">
-            <Redirect to={session ? '/tabs/chats' : '/login'} />
-          </Route>
-        </IonRouterOutlet>
+            {/* Default redirect */}
+            <Route exact path="/">
+              <Redirect to={session ? '/tabs/chats' : '/login'} />
+            </Route>
+          </IonRouterOutlet>
+        </CallProvider>
       </IonReactRouter>
     </IonApp>
+  );
+};
+
+const GlobalCallRenderer: React.FC = () => {
+  const videoCall = useCall();
+  const [callState, setCallState] = useState(getActiveCallState());
+
+  useEffect(() => {
+    const handleStateChange = () => {
+      setCallState(getActiveCallState());
+    };
+    window.addEventListener('arvs-call-state-change', handleStateChange);
+    return () => window.removeEventListener('arvs-call-state-change', handleStateChange);
+  }, []);
+
+  const handleManualPiP = () => {
+    if (Capacitor.isNativePlatform() && Capacitor.getPlatform() === 'android') {
+      triggerNativePiP();
+    } else {
+      window.dispatchEvent(new CustomEvent('arvs-trigger-native-pip'));
+    }
+  };
+
+  return (
+    <>
+      <VideoCallModal
+        isOpen={
+          callState.isModalOpen && (
+            videoCall.callStatus === 'calling'
+            || videoCall.callStatus === 'connecting'
+            || videoCall.callStatus === 'active'
+            || videoCall.callStatus === 'ended'
+          )
+        }
+        callStatus={videoCall.callStatus}
+        localStream={videoCall.localStream}
+        remoteStream={videoCall.remoteStream}
+        isMuted={videoCall.isMuted}
+        isVideoOff={videoCall.isVideoOff}
+        callDuration={videoCall.callDuration}
+        remoteName={videoCall.remoteName || 'Someone'}
+        remoteAvatarUrl={videoCall.remoteAvatarUrl}
+        onHangUp={videoCall.hangUp}
+        onToggleMute={videoCall.toggleMuteAudio}
+        onToggleVideo={videoCall.toggleCameraOff}
+        onMinimize={() => setCallModalOpen(false)}
+        onTriggerPiP={handleManualPiP}
+        onSwitchCamera={videoCall.flipCamera}
+        facingMode={videoCall.facingMode}
+      />
+
+      <IncomingCallOverlay
+        isOpen={videoCall.callStatus === 'ringing'}
+        callerName={videoCall.remoteName || 'Someone'}
+        callerAvatarUrl={videoCall.remoteAvatarUrl}
+        onAccept={videoCall.acceptIncomingCall}
+        onReject={videoCall.rejectIncomingCall}
+      />
+    </>
   );
 };
 
