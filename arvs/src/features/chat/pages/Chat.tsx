@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useRef, useState, type CSSProperties } from 'react';
+import { useCallback, useMemo, useRef, useState, type CSSProperties } from 'react';
 import {
   IonActionSheet,
   IonAlert,
@@ -22,8 +22,6 @@ import { ChatBubble, MediaPreview, MediaViewerModal, MessageInput } from '../com
 import ErrorBoundary from '../../../components/ErrorBoundary';
 import { useCall } from '../../calls';
 import { useAuth } from '../../auth/hooks';
-import { getActiveCallState, triggerNativePiP } from '../../calls/services';
-import { Capacitor } from '@capacitor/core';
 import {
   useChatRealtime,
   useMediaCapture,
@@ -53,25 +51,6 @@ const Chat: React.FC = () => {
   }, [presentToast]);
 
   const videoCall = useCall();
-  const [callState, setCallState] = useState(getActiveCallState());
-
-  // Listen for global call state changes to control call modal visibility
-  useEffect(() => {
-    const handleStateChange = () => {
-      setCallState(getActiveCallState());
-    };
-    window.addEventListener('arvs-call-state-change', handleStateChange);
-    return () => window.removeEventListener('arvs-call-state-change', handleStateChange);
-  }, []);
-
-  const handleManualPiP = useCallback(() => {
-    if (Capacitor.isNativePlatform() && Capacitor.getPlatform() === 'android') {
-      triggerNativePiP();
-    } else {
-      // Dispatch custom event to enter native Picture-in-Picture on the persistent video element
-      window.dispatchEvent(new CustomEvent('arvs-trigger-native-pip'));
-    }
-  }, []);
 
   const [mediaViewer, setMediaViewer] = useState<{ src: string; type: 'image' | 'video' } | null>(null);
   const [showCaptureSheet, setShowCaptureSheet] = useState(false);

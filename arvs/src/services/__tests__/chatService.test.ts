@@ -243,6 +243,10 @@ describe('chatService', () => {
       ];
 
       mockedSupabaseRpc.mockResolvedValue({ data: mockRpcData, error: null });
+      mockedSupabaseFrom.mockReturnValue({
+        select: vi.fn().mockReturnThis(),
+        in: vi.fn().mockResolvedValue({ data: [], error: null }),
+      });
 
       const result = await getSummaries('user-1', 30, null);
 
@@ -260,12 +264,14 @@ describe('chatService', () => {
 
       const mockSelect = vi.fn().mockReturnThis();
       const mockEq = vi.fn().mockReturnThis();
+      const mockIn = vi.fn().mockReturnThis();
       const mockOrder = vi.fn().mockReturnThis();
       const mockLimit = vi.fn().mockResolvedValue({ data: [], error: null });
 
       mockedSupabaseFrom.mockReturnValue({
         select: mockSelect,
         eq: mockEq,
+        in: mockIn,
         order: mockOrder,
         limit: mockLimit,
         maybeSingle: vi.fn().mockResolvedValue({ data: null, error: null }),

@@ -6,14 +6,17 @@
  * bypassing heavy MP3 files and ensuring 100% offline reliability.
  */
 
+type AudioContextConstructor = typeof AudioContext;
+
 class CallSoundManager {
   private audioCtx: AudioContext | null = null;
-  private ringtoneInterval: any = null;
-  private ringbackInterval: any = null;
+  private ringtoneInterval: ReturnType<typeof setInterval> | null = null;
+  private ringbackInterval: ReturnType<typeof setInterval> | null = null;
 
   private initCtx(): void {
     if (!this.audioCtx) {
-      const AudioContextClass = window.AudioContext || (window as any).webkitAudioContext;
+      const AudioContextClass = window.AudioContext
+        || (window as Window & { webkitAudioContext?: AudioContextConstructor }).webkitAudioContext;
       if (AudioContextClass) {
         this.audioCtx = new AudioContextClass();
       }

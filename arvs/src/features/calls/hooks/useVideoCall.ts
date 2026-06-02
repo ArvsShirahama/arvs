@@ -167,12 +167,11 @@ export function useVideoCall(localUserId: string | undefined): UseVideoCallRetur
 
   // Manage ringtone and vibration lifecycles based on callStatus
   useEffect(() => {
-    let vibeInterval: any = null;
+    let vibeInterval: ReturnType<typeof setInterval> | null = null;
 
     const canVibrateWeb = () => {
       if (typeof navigator === 'undefined' || !navigator.vibrate) return false;
-      const ua = (navigator as any).userActivation;
-      if (ua && !ua.hasBeenActive) return false;
+      if (navigator.userActivation && !navigator.userActivation.hasBeenActive) return false;
       return true;
     };
 
@@ -184,7 +183,7 @@ export function useVideoCall(localUserId: string | undefined): UseVideoCallRetur
       } else if (canVibrateWeb()) {
         try {
           navigator.vibrate([500, 250, 500]);
-        } catch (e) {
+        } catch {
           // ignore web vibration blocks
         }
       }
@@ -201,7 +200,7 @@ export function useVideoCall(localUserId: string | undefined): UseVideoCallRetur
       if (canVibrateWeb()) {
         try {
           navigator.vibrate(0);
-        } catch (e) {
+        } catch {
           // ignore
         }
       }
@@ -215,7 +214,7 @@ export function useVideoCall(localUserId: string | undefined): UseVideoCallRetur
       if (canVibrateWeb()) {
         try {
           navigator.vibrate(0);
-        } catch (e) {
+        } catch {
           // ignore
         }
       }
@@ -238,6 +237,8 @@ export function useVideoCall(localUserId: string | undefined): UseVideoCallRetur
 
     try {
       setCallStatus('calling');
+      setRemoteName(remoteNameVal);
+      setRemoteAvatarUrl(remoteAvatarVal);
       setCallModalOpen(true);
       const { callId, localStream: ls, remoteStream: rs } = await startCall(
         conversationId,
@@ -336,6 +337,5 @@ export function useVideoCall(localUserId: string | undefined): UseVideoCallRetur
 }
 
 export type { CallStatus };
-
 
 

@@ -1,7 +1,6 @@
-import React, { createContext, useContext } from 'react';
-import { useVideoCall, UseVideoCallReturn } from '../hooks/useVideoCall';
-
-const CallContext = createContext<UseVideoCallReturn | null>(null);
+import React from 'react';
+import { useVideoCall } from '../hooks/useVideoCall';
+import { CallContext } from './callContextValue';
 
 interface CallProviderProps {
   localUserId: string | undefined;
@@ -19,12 +18,4 @@ export const CallProvider: React.FC<CallProviderProps> = ({
       {children}
     </CallContext.Provider>
   );
-};
-
-export const useCall = (): UseVideoCallReturn => {
-  const context = useContext(CallContext);
-  if (!context) {
-    throw new Error('useCall must be used within a CallProvider');
-  }
-  return context;
 };

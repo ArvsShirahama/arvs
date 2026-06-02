@@ -270,7 +270,7 @@ export default function VideoCallModal({
             <button
               className="video-call-btn"
               onClick={onSwitchCamera}
-              aria-label="Switch camera"
+              aria-label={`Switch to ${facingMode === 'user' ? 'back' : 'front'} camera`}
             >
               <IonIcon icon={cameraReverse} />
             </button>

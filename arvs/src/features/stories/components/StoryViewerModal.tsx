@@ -57,7 +57,7 @@ interface StoryViewerModalProps {
 
 const STORY_DURATION_MS = 10_000;
 const SWIPE_THRESHOLD_PX = 45;
-const QUICK_REACTIONS = ['❤', '🔥', '😂', '😮', '👏'];
+const QUICK_REACTIONS = ['\u2764', '\ud83d\udd25', '\ud83d\ude02', '\ud83d\ude2e', '\ud83d\udc4f'];
 
 export default function StoryViewerModal({
   isOpen,
@@ -381,7 +381,7 @@ export default function StoryViewerModal({
           <div className="story-owner-interactions">
             <div className="story-owner-interactions-header">Reactions & Replies</div>
             <div className="story-owner-interactions-summary">
-              {currentStoryReactions.length} reactions • {currentStoryReplies.length} replies
+              {currentStoryReactions.length} reactions &bull; {currentStoryReplies.length} replies
             </div>
             {currentStoryReplies.length > 0 ? (
               <div className="story-owner-reply-list">

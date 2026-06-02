@@ -25,6 +25,10 @@ CREATE INDEX IF NOT EXISTS idx_conversation_nicknames_user
 ALTER TABLE conversation_nicknames ENABLE ROW LEVEL SECURITY;
 
 -- 4. RLS Policies
+DROP POLICY IF EXISTS "Users can view nicknames in their conversations" ON conversation_nicknames;
+DROP POLICY IF EXISTS "Users can set nicknames in their conversations" ON conversation_nicknames;
+DROP POLICY IF EXISTS "Users can update nicknames in their conversations" ON conversation_nicknames;
+DROP POLICY IF EXISTS "Users can delete nicknames in their conversations" ON conversation_nicknames;
 
 -- Users can view nicknames in conversations they participate in
 CREATE POLICY "Users can view nicknames in their conversations"
@@ -48,6 +52,11 @@ CREATE POLICY "Users can set nicknames in their conversations"
       WHERE cp.conversation_id = conversation_nicknames.conversation_id
         AND cp.user_id = auth.uid()
     )
+    AND EXISTS (
+      SELECT 1 FROM conversation_participants target_cp
+      WHERE target_cp.conversation_id = conversation_nicknames.conversation_id
+        AND target_cp.user_id = conversation_nicknames.user_id
+    )
   );
 
 CREATE POLICY "Users can update nicknames in their conversations"
@@ -58,6 +67,23 @@ CREATE POLICY "Users can update nicknames in their conversations"
       SELECT 1 FROM conversation_participants cp
       WHERE cp.conversation_id = conversation_nicknames.conversation_id
         AND cp.user_id = auth.uid()
+    )
+    AND EXISTS (
+      SELECT 1 FROM conversation_participants target_cp
+      WHERE target_cp.conversation_id = conversation_nicknames.conversation_id
+        AND target_cp.user_id = conversation_nicknames.user_id
+    )
+  )
+  WITH CHECK (
+    EXISTS (
+      SELECT 1 FROM conversation_participants cp
+      WHERE cp.conversation_id = conversation_nicknames.conversation_id
+        AND cp.user_id = auth.uid()
+    )
+    AND EXISTS (
+      SELECT 1 FROM conversation_participants target_cp
+      WHERE target_cp.conversation_id = conversation_nicknames.conversation_id
+        AND target_cp.user_id = conversation_nicknames.user_id
     )
   );
 
@@ -81,6 +107,7 @@ CREATE OR REPLACE FUNCTION save_conversation_participant_nickname(
 RETURNS conversation_nicknames
 LANGUAGE plpgsql
 SECURITY DEFINER
+SET search_path = public
 AS $$
 DECLARE
   result conversation_nicknames;
@@ -92,6 +119,15 @@ BEGIN
       AND user_id = auth.uid()
   ) THEN
     RAISE EXCEPTION 'Not a participant in this conversation';
+  END IF;
+
+  -- Verify the user receiving the nickname also belongs to this conversation.
+  IF NOT EXISTS (
+    SELECT 1 FROM conversation_participants
+    WHERE conversation_id = p_conversation_id
+      AND user_id = p_user_id
+  ) THEN
+    RAISE EXCEPTION 'Target user is not a participant in this conversation';
   END IF;
 
   INSERT INTO conversation_nicknames (conversation_id, user_id, nickname, updated_by, updated_at)
@@ -107,5 +143,14 @@ BEGIN
 END;
 $$;
 
+REVOKE ALL ON FUNCTION save_conversation_participant_nickname(UUID, UUID, TEXT) FROM PUBLIC;
+GRANT EXECUTE ON FUNCTION save_conversation_participant_nickname(UUID, UUID, TEXT) TO authenticated;
+
 -- 6. Enable realtime
-ALTER PUBLICATION supabase_realtime ADD TABLE conversation_nicknames;
+DO $$
+BEGIN
+  ALTER PUBLICATION supabase_realtime ADD TABLE conversation_nicknames;
+EXCEPTION
+  WHEN duplicate_object THEN NULL;
+END;
+$$;

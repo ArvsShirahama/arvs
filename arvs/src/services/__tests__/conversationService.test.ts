@@ -166,13 +166,22 @@ describe('conversationService', () => {
     });
 
     it('should return null otherUser when no other participant exists', async () => {
-      mockedSupabaseFrom.mockImplementation((table: string) => ({
-        select: vi.fn().mockReturnThis(),
-        eq: vi.fn().mockResolvedValue({
-          data: table === 'conversation_participants' ? [{ user_id: 'user-1' }] : [],
-          error: null,
-        }),
-      }));
+      mockedSupabaseFrom.mockImplementation((table: string) => {
+        if (table === 'profiles') {
+          return {
+            select: vi.fn().mockReturnThis(),
+            in: vi.fn().mockResolvedValue({ data: [], error: null }),
+          };
+        }
+
+        return {
+          select: vi.fn().mockReturnThis(),
+          eq: vi.fn().mockResolvedValue({
+            data: table === 'conversation_participants' ? [{ user_id: 'user-1' }] : [],
+            error: null,
+          }),
+        };
+      });
 
       const result = await getConversationContext('conv-1', 'user-1');
 
@@ -216,6 +225,18 @@ describe('conversationService', () => {
             eq: vi.fn().mockResolvedValue({ data: [ownPreference, peerPreference], error: null }),
           };
         }
+        if (table === 'conversation_nicknames') {
+          return {
+            select: vi.fn().mockReturnThis(),
+            eq: vi.fn().mockResolvedValue({ data: [], error: null }),
+          };
+        }
+        if (table === 'profiles') {
+          return {
+            select: vi.fn().mockReturnThis(),
+            in: vi.fn().mockResolvedValue({ data: [], error: null }),
+          };
+        }
         return {
           select: vi.fn().mockReturnThis(),
           eq: vi.fn().mockReturnThis(),
@@ -227,6 +248,29 @@ describe('conversationService', () => {
 
       expect(result.preference?.peer_nickname).toBe('Bestie');
       expect(result.preference?.background_image_url).toBe('https://example.com/shared.jpg');
+    });
+  });
+
+  describe('saveConversationParticipantNickname', () => {
+    it('should save a shared participant nickname through RPC', async () => {
+      const mockNickname = {
+        conversation_id: 'conv-1',
+        user_id: 'user-2',
+        nickname: 'Bestie',
+        updated_by: 'user-1',
+        created_at: '2024-01-01T00:00:00Z',
+        updated_at: '2024-01-01T00:00:00Z',
+      };
+      mockedSupabaseRpc.mockResolvedValue({ data: mockNickname, error: null });
+
+      const result = await saveConversationParticipantNickname('conv-1', 'user-2', ' Bestie ');
+
+      expect(mockedSupabaseRpc).toHaveBeenCalledWith('save_conversation_participant_nickname', {
+        p_conversation_id: 'conv-1',
+        p_user_id: 'user-2',
+        p_nickname: 'Bestie',
+      });
+      expect(result).toEqual(mockNickname);
     });
   });
 
