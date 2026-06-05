@@ -1,0 +1,36 @@
+.feed-page {
+  --background: #fff;
+}
+
+.feed-list {
+  width: min(100%, 640px);
+  margin: 0 auto;
+  padding: 0 0 1rem;
+}
+
+.feed-loading,
+.feed-empty {
+  display: grid;
+  min-height: 55vh;
+  place-items: center;
+  padding: 2rem;
+  text-align: center;
+}
+
+.feed-empty {
+  align-content: center;
+  gap: 0.75rem;
+}
+
+.feed-empty > ion-icon {
+  color: var(--app-text-muted);
+  font-size: 3rem;
+}
+
+.feed-empty p {
+  margin: 0;
+}
+
+html.ion-palette-dark .feed-page {
+  --background: var(--ion-background-color);
+}

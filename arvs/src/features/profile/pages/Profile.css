@@ -32,6 +32,20 @@
   margin: 0.5rem 0 0;
 }
 
+.profile-social-stats {
+  display: flex;
+  gap: 1rem;
+  justify-content: center;
+  margin-top: 0.75rem;
+  color: var(--app-text-muted, var(--ion-color-medium));
+  font-size: 0.85rem;
+}
+
+.profile-social-stats strong {
+  color: var(--app-text, var(--ion-text-color));
+  font-weight: 700;
+}
+
 .profile-form {
   display: flex;
   flex-direction: column;

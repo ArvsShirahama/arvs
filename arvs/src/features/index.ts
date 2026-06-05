@@ -3,4 +3,5 @@ export * as StoriesFeature from './stories';
 export * as CallsFeature from './calls';
 export * as AuthFeature from './auth';
 export * as ProfileFeature from './profile';
+export * as FeedFeature from './feed';
 

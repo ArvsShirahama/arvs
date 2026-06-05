@@ -13,7 +13,7 @@ import {
   setupIonicReact,
 } from '@ionic/react';
 import { IonReactRouter } from '@ionic/react-router';
-import { chatbubblesOutline, personOutline } from 'ionicons/icons';
+import { chatbubblesOutline, imagesOutline, personOutline } from 'ionicons/icons';
 import { useAuth } from './features/auth/hooks';
 import { registerPlugin, Capacitor } from '@capacitor/core';
 import type { PluginListenerHandle } from '@capacitor/core';
@@ -24,6 +24,7 @@ import GlobalActiveCallBanner from './components/GlobalActiveCallBanner';
 import GlobalVideoCallPiP from './components/GlobalVideoCallPiP';
 import { initializeThemeMode } from './services/themeService';
 import ChatListPage from './features/chat/pages/ChatList';
+import FeedPage from './features/feed/pages/Feed';
 import ProfilePage from './features/profile/pages/Profile';
 import {
   CallProvider,
@@ -54,6 +55,7 @@ const SignUpPage = lazy(() => import('./features/auth/pages/SignUp'));
 const ChatPage = lazy(() => import('./features/chat/pages/Chat'));
 const ConversationMediaPage = lazy(() => import('./features/chat/pages/ConversationMedia'));
 const ConversationSettingsPage = lazy(() => import('./features/chat/pages/ConversationSettings'));
+const UserProfilePage = lazy(() => import('./features/feed/pages/UserProfile'));
 
 /* Core CSS required for Ionic components to work properly */
 import '@ionic/react/css/core.css';
@@ -174,6 +176,9 @@ const App: React.FC = () => {
               <Route exact path="/chat/:conversationId/media">
                 {session ? <ConversationMediaPage /> : <Redirect to="/login" />}
               </Route>
+              <Route exact path="/users/:userId">
+                {session ? <UserProfilePage /> : <Redirect to="/login" />}
+              </Route>
 
               {/* Tab routes */}
               <Route path="/tabs">
@@ -181,6 +186,7 @@ const App: React.FC = () => {
                   <IonTabs>
                     <IonRouterOutlet>
                       <Route exact path="/tabs/chats" component={ChatListPage} />
+                      <Route exact path="/tabs/feed" component={FeedPage} />
                       <Route exact path="/tabs/profile" component={ProfilePage} />
                       <Redirect exact from="/tabs" to="/tabs/chats" />
                     </IonRouterOutlet>
@@ -188,6 +194,10 @@ const App: React.FC = () => {
                       <IonTabButton tab="chats" href="/tabs/chats">
                         <IonIcon icon={chatbubblesOutline} />
                         <IonLabel>Chats</IonLabel>
+                      </IonTabButton>
+                      <IonTabButton tab="feed" href="/tabs/feed">
+                        <IonIcon icon={imagesOutline} />
+                        <IonLabel>Feed</IonLabel>
                       </IonTabButton>
                       <IonTabButton tab="profile" href="/tabs/profile">
                         <IonIcon icon={personOutline} />

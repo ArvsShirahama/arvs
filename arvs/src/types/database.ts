@@ -147,3 +147,63 @@ export interface StoryReply {
   content: string;
   created_at: string;
 }
+
+export type PostMediaType = 'image' | 'video';
+export type PostAspectRatio = 'portrait' | 'square' | 'landscape';
+
+export interface Post {
+  id: string;
+  user_id: string;
+  media_url: string;
+  media_path: string;
+  media_type: PostMediaType;
+  aspect_ratio: PostAspectRatio;
+  caption: string;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface PostMedia {
+  id: string;
+  post_id: string;
+  media_url: string;
+  media_path: string;
+  media_type: PostMediaType;
+  position: number;
+  width: number | null;
+  height: number | null;
+  created_at: string;
+}
+
+export interface CreatePostMediaInput {
+  file: File;
+  mediaType: PostMediaType;
+  width: number | null;
+  height: number | null;
+}
+
+export interface PostLike {
+  id: string;
+  post_id: string;
+  user_id: string;
+  created_at: string;
+}
+
+export interface Follow {
+  follower_id: string;
+  following_id: string;
+  created_at: string;
+}
+
+export interface PostWithAuthor extends Post {
+  author: Profile;
+  media: PostMedia[];
+  like_count: number;
+  liked_by_me: boolean;
+  is_following_author: boolean;
+}
+
+export interface FeedPageCursor {
+  beforeCreatedAt: string | null;
+  limit: number;
+}

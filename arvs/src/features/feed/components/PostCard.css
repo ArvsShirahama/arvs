@@ -1,0 +1,112 @@
+.post-card {
+  overflow: hidden;
+  border: 0;
+  border-radius: 0;
+  background: var(--app-surface);
+  box-shadow: none;
+}
+
+.post-card + .post-card {
+  margin-top: 0.85rem;
+  border-top: 1px solid var(--app-border);
+}
+
+.post-card-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.75rem;
+  padding: 0.8rem 0.9rem;
+}
+
+.post-author-button {
+  display: inline-flex;
+  min-width: 0;
+  align-items: center;
+  gap: 0.65rem;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  color: inherit;
+  text-align: left;
+}
+
+.post-author-copy {
+  display: grid;
+  min-width: 0;
+}
+
+.post-author-copy strong,
+.post-author-copy small {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.post-author-copy strong {
+  color: var(--app-text);
+  font-size: 0.95rem;
+  font-weight: 750;
+}
+
+.post-author-copy small {
+  color: var(--app-text-muted);
+  font-size: 0.76rem;
+}
+
+.post-card-actions {
+  display: inline-flex;
+  flex-shrink: 0;
+  align-items: center;
+  gap: 0.25rem;
+}
+
+.post-follow-btn {
+  --border-radius: 999px;
+  min-height: 30px;
+  font-size: 0.72rem;
+  text-transform: none;
+}
+
+.post-card-footer {
+  padding: 0.7rem 0.9rem 0.9rem;
+}
+
+.post-like-button {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.4rem;
+  min-height: 36px;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  color: var(--app-text);
+  font-size: 0.95rem;
+  font-weight: 700;
+}
+
+.post-like-button ion-icon {
+  font-size: 1.55rem;
+}
+
+.post-like-button ion-spinner {
+  width: 1.35rem;
+  height: 1.35rem;
+}
+
+.post-liked {
+  color: #ef4444;
+}
+
+.post-caption {
+  margin: 0.25rem 0 0;
+  color: var(--app-text);
+  font-size: 0.92rem;
+  line-height: 1.35;
+  white-space: pre-wrap;
+}
+
+.post-card-compact {
+  border-radius: 0;
+  box-shadow: none;
+}

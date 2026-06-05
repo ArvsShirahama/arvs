@@ -1,0 +1,27 @@
+.user-posts-section {
+  margin-top: 1.25rem;
+}
+
+.user-posts-section h2 {
+  margin: 0 0 0.75rem;
+  color: var(--app-text);
+  font-size: 1.1rem;
+  font-weight: 800;
+}
+
+.user-posts-loading {
+  display: flex;
+  justify-content: center;
+  padding: 1.5rem 0;
+}
+
+.user-posts-empty {
+  display: block;
+  padding: 0.5rem 0 1rem;
+  text-align: center;
+}
+
+.user-posts-list {
+  display: grid;
+  gap: 1rem;
+}

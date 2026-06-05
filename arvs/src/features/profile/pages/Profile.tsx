@@ -28,6 +28,8 @@ import {
 } from '../../../services/pipService';
 import { supabase } from '../../../supabaseClient';
 import Avatar from '../../../components/Avatar';
+import { UserPostsSection } from '../../feed/components';
+import { getFollowState, type FollowState } from '../../feed/services';
 import './Profile.css';
 
 const Profile: React.FC = () => {
@@ -42,6 +44,11 @@ const Profile: React.FC = () => {
   const [uploading, setUploading] = useState(false);
   const [darkModeEnabled, setDarkModeEnabled] = useState(resolveThemeMode() === 'dark');
   const [pipEnabled, setPipEnabledState] = useState(getStoredPipEnabled());
+  const [followState, setFollowState] = useState<FollowState>({
+    followerCount: 0,
+    followingCount: 0,
+    isFollowing: false,
+  });
 
   useEffect(() => {
     setDisplayName(profile?.display_name ?? '');
@@ -59,6 +66,30 @@ const Profile: React.FC = () => {
       setPipEnabledState(enabled);
     });
   }, []);
+
+  useEffect(() => {
+    if (!user?.id) return;
+    let cancelled = false;
+
+    const loadFollowCounts = async () => {
+      try {
+        const state = await getFollowState(user.id, user.id);
+        if (!cancelled) {
+          setFollowState(state);
+        }
+      } catch {
+        if (!cancelled) {
+          setFollowState({ followerCount: 0, followingCount: 0, isFollowing: false });
+        }
+      }
+    };
+
+    void loadFollowCounts();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [user?.id]);
 
   const handleSave = async () => {
     if (!user) return;
@@ -158,6 +189,10 @@ const Profile: React.FC = () => {
             <IonText color="medium" className="avatar-hint">
               <p>Tap to change photo</p>
             </IonText>
+            <div className="profile-social-stats" aria-label="Profile social counts">
+              <span><strong>{followState.followerCount}</strong> Followers</span>
+              <span><strong>{followState.followingCount}</strong> Following</span>
+            </div>
           </div>
 
           <div className="profile-form">
@@ -229,6 +264,15 @@ const Profile: React.FC = () => {
               Sign Out
             </IonButton>
           </div>
+
+          {user && (
+            <UserPostsSection
+              userId={user.id}
+              currentUserId={user.id}
+              title="My Posts"
+              emptyText="You have not posted yet."
+            />
+          )}
         </div>
       </IonContent>
     </IonPage>

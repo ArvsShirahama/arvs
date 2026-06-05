@@ -1,0 +1,56 @@
+.user-profile-page {
+  --background: var(--ion-background-color);
+}
+
+.user-profile-shell {
+  width: min(100%, 620px);
+  margin: 0 auto;
+  padding: 1rem;
+}
+
+.user-profile-loading,
+.user-profile-empty {
+  display: grid;
+  min-height: 55vh;
+  place-items: center;
+  text-align: center;
+}
+
+.user-profile-card {
+  display: grid;
+  justify-items: center;
+  gap: 0.55rem;
+  padding: 1.25rem;
+  border: 1px solid var(--app-border);
+  border-radius: 24px;
+  background:
+    radial-gradient(circle at top, rgba(79, 70, 229, 0.16), transparent 38%),
+    var(--app-surface);
+  box-shadow: var(--app-shadow);
+  text-align: center;
+}
+
+.user-profile-card h1 {
+  margin: 0.35rem 0 0;
+  color: var(--app-text);
+  font-size: 1.5rem;
+  font-weight: 850;
+}
+
+.user-profile-card p {
+  margin: 0;
+  color: var(--app-text-muted);
+}
+
+.user-profile-stats {
+  display: flex;
+  justify-content: center;
+  gap: 1rem;
+  margin: 0.35rem 0 0.5rem;
+  color: var(--app-text-muted);
+  font-size: 0.9rem;
+}
+
+.user-profile-stats strong {
+  color: var(--app-text);
+}
