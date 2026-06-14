@@ -19,11 +19,11 @@ import {
   type RefresherCustomEvent,
   useIonToast,
 } from '@ionic/react';
-import { add, imagesOutline } from 'ionicons/icons';
+import { add, imagesOutline, searchOutline } from 'ionicons/icons';
 import { useAuth } from '../../auth/hooks';
 import { supabase } from '../../../supabaseClient';
 import type { Post, PostWithAuthor } from '../../../types/database';
-import { CreatePostModal, PostCard } from '../components';
+import { CreatePostModal, PostCard, UserSearchModal } from '../components';
 import {
   deletePost,
   followUser,
@@ -44,6 +44,7 @@ export default function Feed() {
   const [hasMore, setHasMore] = useState(true);
   const [cursor, setCursor] = useState<string | null>(null);
   const [showCreatePost, setShowCreatePost] = useState(false);
+  const [showUserSearch, setShowUserSearch] = useState(false);
   const [busyPostId, setBusyPostId] = useState<string | null>(null);
   const [deleteTarget, setDeleteTarget] = useState<PostWithAuthor | null>(null);
   const refreshTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -217,6 +218,13 @@ export default function Feed() {
           <IonButtons slot="end">
             <IonButton
               fill="clear"
+              onClick={() => setShowUserSearch(true)}
+              aria-label="Search users"
+            >
+              <IonIcon icon={searchOutline} />
+            </IonButton>
+            <IonButton
+              fill="clear"
               onClick={() => setShowCreatePost(true)}
               aria-label="Create post"
             >
@@ -272,6 +280,14 @@ export default function Feed() {
             userId={user.id}
             onDismiss={() => setShowCreatePost(false)}
             onCreated={(post) => void handleCreated(post)}
+          />
+        )}
+
+        {user && (
+          <UserSearchModal
+            isOpen={showUserSearch}
+            currentUserId={user.id}
+            onDismiss={() => setShowUserSearch(false)}
           />
         )}
 

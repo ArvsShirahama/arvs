@@ -1,19 +1,16 @@
-import { useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useState } from 'react';
 import {
-  IonPage,
+  IonButton,
   IonContent,
   IonHeader,
-  IonToolbar,
-  IonTitle,
   IonItem,
   IonLabel,
-  IonInput,
-  IonButton,
-  IonToggle,
-  IonText,
+  IonPage,
   IonSpinner,
+  IonTitle,
+  IonToggle,
+  IonToolbar,
   useIonRouter,
-  useIonToast,
 } from '@ionic/react';
 import { useAuth } from '../../auth/hooks';
 import {
@@ -26,34 +23,45 @@ import {
   setPipEnabled,
   onPipModeChange,
 } from '../../../services/pipService';
-import { supabase } from '../../../supabaseClient';
-import Avatar from '../../../components/Avatar';
-import { UserPostsSection } from '../../feed/components';
 import { getFollowState, type FollowState } from '../../feed/services';
+import {
+  EditProfileModal,
+  ProfilePostsGrid,
+  ProfileStatsModal,
+  SocialProfileHeader,
+} from '../components';
 import './Profile.css';
+
+const emptyFollowState: FollowState = {
+  followerCount: 0,
+  followingCount: 0,
+  isFollowing: false,
+};
 
 const Profile: React.FC = () => {
   const { profile, user, signOut, refreshProfile } = useAuth();
   const router = useIonRouter();
-  const [presentToast] = useIonToast();
-  const fileInputRef = useRef<HTMLInputElement>(null);
-
-  const [displayName, setDisplayName] = useState(profile?.display_name ?? '');
-  const [username, setUsername] = useState(profile?.username ?? '');
-  const [saving, setSaving] = useState(false);
-  const [uploading, setUploading] = useState(false);
   const [darkModeEnabled, setDarkModeEnabled] = useState(resolveThemeMode() === 'dark');
   const [pipEnabled, setPipEnabledState] = useState(getStoredPipEnabled());
-  const [followState, setFollowState] = useState<FollowState>({
-    followerCount: 0,
-    followingCount: 0,
-    isFollowing: false,
-  });
+  const [followState, setFollowState] = useState<FollowState>(emptyFollowState);
+  const [postCount, setPostCount] = useState(0);
+  const [showEditProfile, setShowEditProfile] = useState(false);
+  const [statsMode, setStatsMode] = useState<'followers' | 'following' | null>(null);
+
+  const loadFollowCounts = useCallback(async () => {
+    if (!user?.id) return;
+
+    try {
+      const state = await getFollowState(user.id, user.id);
+      setFollowState(state);
+    } catch {
+      setFollowState(emptyFollowState);
+    }
+  }, [user?.id]);
 
   useEffect(() => {
-    setDisplayName(profile?.display_name ?? '');
-    setUsername(profile?.username ?? '');
-  }, [profile?.id, profile?.display_name, profile?.username]);
+    void loadFollowCounts();
+  }, [loadFollowCounts]);
 
   useEffect(() => {
     return onThemeModeChange((mode) => {
@@ -67,83 +75,8 @@ const Profile: React.FC = () => {
     });
   }, []);
 
-  useEffect(() => {
-    if (!user?.id) return;
-    let cancelled = false;
-
-    const loadFollowCounts = async () => {
-      try {
-        const state = await getFollowState(user.id, user.id);
-        if (!cancelled) {
-          setFollowState(state);
-        }
-      } catch {
-        if (!cancelled) {
-          setFollowState({ followerCount: 0, followingCount: 0, isFollowing: false });
-        }
-      }
-    };
-
-    void loadFollowCounts();
-
-    return () => {
-      cancelled = true;
-    };
-  }, [user?.id]);
-
-  const handleSave = async () => {
-    if (!user) return;
-    if (!username.trim() || !displayName.trim()) {
-      presentToast({ message: 'Name and username are required.', duration: 2000, color: 'danger' });
-      return;
-    }
-    setSaving(true);
-    const { error } = await supabase
-      .from('profiles')
-      .update({ display_name: displayName.trim(), username: username.trim() })
-      .eq('id', user.id);
-    setSaving(false);
-
-    if (error) {
-      presentToast({ message: error.message, duration: 3000, color: 'danger' });
-    } else {
-      await refreshProfile();
-      presentToast({ message: 'Profile updated!', duration: 2000, color: 'success' });
-    }
-  };
-
-  const handleAvatarUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
-    const file = e.target.files?.[0];
-    if (!file || !user) return;
-
-    const fileExt = file.name.split('.').pop();
-    const filePath = `${user.id}/avatar.${fileExt}`;
-
-    setUploading(true);
-    const { error: uploadError } = await supabase.storage
-      .from('avatars')
-      .upload(filePath, file, { upsert: true });
-
-    if (uploadError) {
-      setUploading(false);
-      presentToast({ message: uploadError.message, duration: 3000, color: 'danger' });
-      return;
-    }
-
-    const { data: publicUrlData } = supabase.storage
-      .from('avatars')
-      .getPublicUrl(filePath);
-
-    const avatarUrl = `${publicUrlData.publicUrl}?t=${Date.now()}`;
-
-    await supabase
-      .from('profiles')
-      .update({ avatar_url: avatarUrl })
-      .eq('id', user.id);
-
-    await refreshProfile();
-    setUploading(false);
-    presentToast({ message: 'Avatar updated!', duration: 2000, color: 'success' });
+  const handleProfileSaved = () => {
+    void refreshProfile();
   };
 
   const handleSignOut = async () => {
@@ -152,9 +85,8 @@ const Profile: React.FC = () => {
   };
 
   const handleThemeToggle = (checked: boolean) => {
-    const mode = checked ? 'dark' : 'light';
     setDarkModeEnabled(checked);
-    setThemeMode(mode);
+    setThemeMode(checked ? 'dark' : 'light');
   };
 
   const handlePipToggle = (checked: boolean) => {
@@ -169,111 +101,87 @@ const Profile: React.FC = () => {
           <IonTitle>Profile</IonTitle>
         </IonToolbar>
       </IonHeader>
-      <IonContent className="ion-padding profile-page">
-        <div className="profile-container">
-          <div className="profile-avatar-section">
-            <Avatar
-              src={profile?.avatar_url}
-              name={profile?.display_name || 'User'}
-              size="large"
-              onClick={() => fileInputRef.current?.click()}
-            />
-            <input
-              type="file"
-              accept="image/*"
-              ref={fileInputRef}
-              hidden
-              onChange={handleAvatarUpload}
-            />
-            {uploading && <IonSpinner name="crescent" className="upload-spinner" />}
-            <IonText color="medium" className="avatar-hint">
-              <p>Tap to change photo</p>
-            </IonText>
-            <div className="profile-social-stats" aria-label="Profile social counts">
-              <span><strong>{followState.followerCount}</strong> Followers</span>
-              <span><strong>{followState.followingCount}</strong> Following</span>
-            </div>
+
+      <IonContent className="profile-page">
+        {!profile || !user ? (
+          <div className="profile-loading">
+            <IonSpinner name="crescent" />
           </div>
-
-          <div className="profile-form">
-            <IonInput
-              label="Display Name"
-              labelPlacement="floating"
-              fill="outline"
-              value={displayName}
-              onIonInput={(e) => setDisplayName(e.detail.value ?? '')}
-              className="profile-input"
-            />
-            <IonInput
-              label="Username"
-              labelPlacement="floating"
-              fill="outline"
-              value={username}
-              onIonInput={(e) => setUsername(e.detail.value ?? '')}
-              className="profile-input"
-            />
-            <IonInput
-              label="Email"
-              labelPlacement="floating"
-              fill="outline"
-              value={user?.email ?? ''}
-              readonly
-              className="profile-input"
+        ) : (
+          <div className="profile-shell">
+            <SocialProfileHeader
+              profile={profile}
+              followState={followState}
+              postCount={postCount}
+              isOwnProfile
+              onEdit={() => setShowEditProfile(true)}
+              onOpenFollowers={() => setStatsMode('followers')}
+              onOpenFollowing={() => setStatsMode('following')}
             />
 
-            <IonItem lines="none" className="profile-theme-item">
-              <IonLabel>
-                <h3>Dark Mode</h3>
-                <p>Toggle app appearance between light and dark.</p>
-              </IonLabel>
-              <IonToggle
-                checked={darkModeEnabled}
-                onIonChange={(event) => handleThemeToggle(event.detail.checked)}
-                aria-label="Toggle dark mode"
-              />
-            </IonItem>
+            <section className="profile-settings-card" aria-label="Profile settings">
+              <h2>Settings</h2>
 
-            <IonItem lines="none" className="profile-theme-item">
-              <IonLabel>
-                <h3>Picture-in-Picture (PiP) Mode</h3>
-                <p>Continue video calls in a floating window when exiting the app.</p>
-              </IonLabel>
-              <IonToggle
-                checked={pipEnabled}
-                onIonChange={(event) => handlePipToggle(event.detail.checked)}
-                aria-label="Toggle PiP mode"
-              />
-            </IonItem>
+              <IonItem lines="none" className="profile-settings-item">
+                <IonLabel>
+                  <h3>Dark Mode</h3>
+                  <p>Switch the app appearance.</p>
+                </IonLabel>
+                <IonToggle
+                  checked={darkModeEnabled}
+                  onIonChange={(event) => handleThemeToggle(event.detail.checked)}
+                  aria-label="Toggle dark mode"
+                />
+              </IonItem>
 
-            <IonButton
-              expand="block"
-              onClick={handleSave}
-              disabled={saving}
-              className="profile-save-btn"
-            >
-              {saving ? <IonSpinner name="crescent" /> : 'Save Changes'}
-            </IonButton>
+              <IonItem lines="none" className="profile-settings-item">
+                <IonLabel>
+                  <h3>Picture-in-Picture</h3>
+                  <p>Keep video calls floating when supported.</p>
+                </IonLabel>
+                <IonToggle
+                  checked={pipEnabled}
+                  onIonChange={(event) => handlePipToggle(event.detail.checked)}
+                  aria-label="Toggle picture in picture mode"
+                />
+              </IonItem>
 
-            <IonButton
-              expand="block"
-              fill="outline"
-              color="medium"
-              onClick={handleSignOut}
-              className="profile-signout-btn"
-            >
-              Sign Out
-            </IonButton>
-          </div>
+              <IonButton
+                expand="block"
+                fill="outline"
+                color="medium"
+                onClick={() => void handleSignOut()}
+                className="profile-signout-btn"
+              >
+                Sign Out
+              </IonButton>
+            </section>
 
-          {user && (
-            <UserPostsSection
+            <ProfilePostsGrid
               userId={user.id}
               currentUserId={user.id}
-              title="My Posts"
               emptyText="You have not posted yet."
+              onCountChange={setPostCount}
             />
-          )}
-        </div>
+
+            <EditProfileModal
+              isOpen={showEditProfile}
+              profile={profile}
+              userId={user.id}
+              onDismiss={() => setShowEditProfile(false)}
+              onSaved={handleProfileSaved}
+            />
+
+            <ProfileStatsModal
+              isOpen={Boolean(statsMode)}
+              mode={statsMode ?? 'followers'}
+              userId={user.id}
+              currentUserId={user.id}
+              onDismiss={() => setStatsMode(null)}
+              onFollowChanged={() => void loadFollowCounts()}
+            />
+          </div>
+        )}
       </IonContent>
     </IonPage>
   );

@@ -1,0 +1,30 @@
+.edit-profile-modal {
+  --background: var(--ion-background-color);
+}
+
+.edit-profile-avatar {
+  display: grid;
+  justify-items: center;
+  gap: 0.45rem;
+  padding: 1.25rem 1rem 0.75rem;
+}
+
+.edit-profile-avatar .avatar-wrapper {
+  cursor: pointer;
+}
+
+.edit-profile-avatar ion-button {
+  text-transform: none;
+  font-weight: 800;
+}
+
+.edit-profile-form {
+  display: grid;
+  gap: 0.85rem;
+  padding: 0.75rem 1rem 1.5rem;
+}
+
+.edit-profile-form ion-input,
+.edit-profile-form ion-textarea {
+  --border-radius: 14px;
+}

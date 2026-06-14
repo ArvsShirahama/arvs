@@ -1,7 +1,6 @@
 import { useCallback, useEffect, useState } from 'react';
 import {
   IonBackButton,
-  IonButton,
   IonButtons,
   IonContent,
   IonHeader,
@@ -10,10 +9,10 @@ import {
   IonText,
   IonTitle,
   IonToolbar,
+  useIonRouter,
   useIonToast,
 } from '@ionic/react';
 import { useParams } from 'react-router-dom';
-import Avatar from '../../../components/Avatar';
 import { useAuth } from '../../auth/hooks';
 import { supabase } from '../../../supabaseClient';
 import type { Profile } from '../../../types/database';
@@ -23,26 +22,35 @@ import {
   type FollowState,
   unfollowUser,
 } from '../services';
-import { UserPostsSection } from '../components';
+import {
+  ProfilePostsGrid,
+  ProfileStatsModal,
+  SocialProfileHeader,
+} from '../../profile/components';
 import './UserProfile.css';
 
 interface RouteParams {
   userId: string;
 }
 
+const emptyFollowState: FollowState = {
+  followerCount: 0,
+  followingCount: 0,
+  isFollowing: false,
+};
+
 function getDisplayName(profile: Profile | null): string {
-  return profile?.display_name?.trim() || profile?.username || 'User';
+  return profile?.display_name?.trim() || profile?.username || 'Profile';
 }
 
 export default function UserProfile() {
   const { userId } = useParams<RouteParams>();
   const { user } = useAuth();
+  const router = useIonRouter();
   const [profile, setProfile] = useState<Profile | null>(null);
-  const [followState, setFollowState] = useState<FollowState>({
-    followerCount: 0,
-    followingCount: 0,
-    isFollowing: false,
-  });
+  const [followState, setFollowState] = useState<FollowState>(emptyFollowState);
+  const [postCount, setPostCount] = useState(0);
+  const [statsMode, setStatsMode] = useState<'followers' | 'following' | null>(null);
   const [loading, setLoading] = useState(true);
   const [busyFollow, setBusyFollow] = useState(false);
   const [presentToast] = useIonToast();
@@ -51,6 +59,7 @@ export default function UserProfile() {
 
   const loadProfile = useCallback(async () => {
     if (!user?.id || !userId) return;
+
     setLoading(true);
     try {
       const [{ data, error }, state] = await Promise.all([
@@ -58,6 +67,7 @@ export default function UserProfile() {
         getFollowState(user.id, userId),
       ]);
       if (error) throw error;
+
       setProfile((data as Profile | null) ?? null);
       setFollowState(state);
     } catch {
@@ -78,6 +88,7 @@ export default function UserProfile() {
 
   const handleFollowToggle = async () => {
     if (!user || isOwnProfile || busyFollow) return;
+
     setBusyFollow(true);
     try {
       if (followState.isFollowing) {
@@ -85,6 +96,7 @@ export default function UserProfile() {
       } else {
         await followUser(user.id, userId);
       }
+
       setFollowState((current) => ({
         ...current,
         isFollowing: !current.isFollowing,
@@ -109,7 +121,7 @@ export default function UserProfile() {
           <IonButtons slot="start">
             <IonBackButton defaultHref="/tabs/feed" text="" />
           </IonButtons>
-          <IonTitle>{profile ? getDisplayName(profile) : 'Profile'}</IonTitle>
+          <IonTitle>{getDisplayName(profile)}</IonTitle>
         </IonToolbar>
       </IonHeader>
 
@@ -118,7 +130,7 @@ export default function UserProfile() {
           <div className="user-profile-loading">
             <IonSpinner name="crescent" />
           </div>
-        ) : !profile ? (
+        ) : !profile || !user ? (
           <div className="user-profile-empty">
             <IonText color="medium">
               <p>User not found.</p>
@@ -126,38 +138,33 @@ export default function UserProfile() {
           </div>
         ) : (
           <div className="user-profile-shell">
-            <section className="user-profile-card">
-              <Avatar
-                src={profile.avatar_url}
-                name={getDisplayName(profile)}
-                size="large"
-              />
-              <h1>{getDisplayName(profile)}</h1>
-              <p>@{profile.username}</p>
-              <div className="user-profile-stats">
-                <span><strong>{followState.followerCount}</strong> Followers</span>
-                <span><strong>{followState.followingCount}</strong> Following</span>
-              </div>
-              {!isOwnProfile && (
-                <IonButton
-                  expand="block"
-                  fill={followState.isFollowing ? 'outline' : 'solid'}
-                  onClick={() => void handleFollowToggle()}
-                  disabled={busyFollow}
-                >
-                  {busyFollow ? <IonSpinner name="crescent" /> : followState.isFollowing ? 'Following' : 'Follow'}
-                </IonButton>
-              )}
-            </section>
+            <SocialProfileHeader
+              profile={profile}
+              followState={followState}
+              postCount={postCount}
+              isOwnProfile={isOwnProfile}
+              busyFollow={busyFollow}
+              onEdit={() => router.push('/tabs/profile', 'root')}
+              onFollowToggle={() => void handleFollowToggle()}
+              onOpenFollowers={() => setStatsMode('followers')}
+              onOpenFollowing={() => setStatsMode('following')}
+            />
 
-            {user && (
-              <UserPostsSection
-                userId={profile.id}
-                currentUserId={user.id}
-                title="Posts"
-                emptyText="No posts yet."
-              />
-            )}
+            <ProfilePostsGrid
+              userId={profile.id}
+              currentUserId={user.id}
+              emptyText="No posts yet."
+              onCountChange={setPostCount}
+            />
+
+            <ProfileStatsModal
+              isOpen={Boolean(statsMode)}
+              mode={statsMode ?? 'followers'}
+              userId={profile.id}
+              currentUserId={user.id}
+              onDismiss={() => setStatsMode(null)}
+              onFollowChanged={() => void loadProfile()}
+            />
           </div>
         )}
       </IonContent>

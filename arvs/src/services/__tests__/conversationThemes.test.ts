@@ -2,17 +2,23 @@ import { describe, it, expect } from 'vitest';
 import { getConversationDisplayName, formatFileSize, getConversationTheme } from '../../features/chat/services/conversationThemes';
 import type { Profile, ConversationPreference } from '../../types/database';
 
+const createProfile = (overrides: Partial<Profile> = {}): Profile => ({
+  id: 'user-1',
+  username: 'johndoe',
+  display_name: 'John Doe',
+  avatar_url: null,
+  bio: '',
+  status_message: '',
+  last_seen: null,
+  created_at: '2024-01-01T00:00:00Z',
+  updated_at: '2024-01-01T00:00:00Z',
+  ...overrides,
+});
+
 describe('conversationThemes', () => {
   describe('getConversationDisplayName', () => {
     it('should return nickname when preference has peer_nickname', () => {
-      const otherUser: Profile = {
-        id: 'user-1',
-        username: 'johndoe',
-        display_name: 'John Doe',
-        avatar_url: null,
-        last_seen: null,
-        created_at: '2024-01-01T00:00:00Z',
-      };
+      const otherUser = createProfile();
       const preference: ConversationPreference = {
         conversation_id: 'conv-1',
         user_id: 'user-2',
@@ -29,27 +35,13 @@ describe('conversationThemes', () => {
     });
 
     it('should return display_name when no nickname is set', () => {
-      const otherUser: Profile = {
-        id: 'user-1',
-        username: 'johndoe',
-        display_name: 'John Doe',
-        avatar_url: null,
-        last_seen: null,
-        created_at: '2024-01-01T00:00:00Z',
-      };
+      const otherUser = createProfile();
 
       expect(getConversationDisplayName(otherUser, null)).toBe('John Doe');
     });
 
     it('should return username when display_name is empty', () => {
-      const otherUser: Profile = {
-        id: 'user-1',
-        username: 'johndoe',
-        display_name: '',
-        avatar_url: null,
-        last_seen: null,
-        created_at: '2024-01-01T00:00:00Z',
-      };
+      const otherUser = createProfile({ display_name: '' });
 
       expect(getConversationDisplayName(otherUser, null)).toBe('johndoe');
     });
@@ -59,14 +51,7 @@ describe('conversationThemes', () => {
     });
 
     it('should trim whitespace from nickname', () => {
-      const otherUser: Profile = {
-        id: 'user-1',
-        username: 'johndoe',
-        display_name: 'John Doe',
-        avatar_url: null,
-        last_seen: null,
-        created_at: '2024-01-01T00:00:00Z',
-      };
+      const otherUser = createProfile();
       const preference: ConversationPreference = {
         conversation_id: 'conv-1',
         user_id: 'user-2',

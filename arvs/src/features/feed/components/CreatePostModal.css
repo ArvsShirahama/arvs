@@ -8,6 +8,11 @@
   background: #000;
 }
 
+.create-post-preview-disabled {
+  opacity: 0.55;
+  pointer-events: none;
+}
+
 .create-post-preview-square {
   aspect-ratio: 1 / 1;
 }
@@ -80,7 +85,9 @@
 }
 
 .create-post-preview-count,
-.create-post-remove {
+.create-post-remove,
+.create-post-adjust,
+.create-post-crop-pending {
   position: absolute;
   z-index: 2;
   border: 0;
@@ -109,6 +116,86 @@
 
 .create-post-remove ion-icon {
   font-size: 1.1rem;
+}
+
+.create-post-adjust {
+  right: 0.55rem;
+  bottom: 0.55rem;
+  display: grid;
+  width: 2rem;
+  height: 2rem;
+  place-items: center;
+}
+
+.create-post-adjust ion-icon {
+  font-size: 1.05rem;
+}
+
+.create-post-crop-pending {
+  left: 0.7rem;
+  bottom: 0.7rem;
+  padding: 0.32rem 0.58rem;
+  color: #fff;
+  font-size: 0.72rem;
+  font-weight: 800;
+  line-height: 1;
+}
+
+.create-post-crop-editor {
+  margin: 1rem;
+  overflow: hidden;
+  border: 1px solid var(--app-border);
+  border-radius: 18px;
+  background: var(--app-surface);
+}
+
+.create-post-crop-stage {
+  position: relative;
+  width: 100%;
+  overflow: hidden;
+  background: #000;
+}
+
+.create-post-crop-stage-square {
+  aspect-ratio: 1 / 1;
+}
+
+.create-post-crop-stage-portrait {
+  aspect-ratio: 4 / 5;
+}
+
+.create-post-crop-stage-landscape {
+  aspect-ratio: 1.91 / 1;
+}
+
+.create-post-crop-controls {
+  display: grid;
+  gap: 0.65rem;
+  padding: 0.85rem;
+}
+
+.create-post-crop-copy {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.75rem;
+}
+
+.create-post-crop-copy strong {
+  color: var(--app-text);
+  font-size: 0.95rem;
+}
+
+.create-post-crop-copy span {
+  color: var(--app-text-muted);
+  font-size: 0.78rem;
+  font-weight: 700;
+}
+
+.create-post-crop-controls ion-button {
+  --border-radius: 14px;
+  min-height: 44px;
+  text-transform: none;
 }
 
 .create-post-ratio-segment {

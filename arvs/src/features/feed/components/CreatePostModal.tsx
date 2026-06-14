@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState } from 'react';
+import Cropper, { type Area, type Point } from 'react-easy-crop';
 import {
   IonButton,
   IonButtons,
@@ -6,6 +7,7 @@ import {
   IonHeader,
   IonIcon,
   IonModal,
+  IonRange,
   IonSegment,
   IonSegmentButton,
   IonSpinner,
@@ -14,7 +16,7 @@ import {
   IonToolbar,
   useIonToast,
 } from '@ionic/react';
-import { add, close, imagesOutline } from 'ionicons/icons';
+import { add, close, cropOutline, imagesOutline } from 'ionicons/icons';
 import { createPost } from '../services';
 import type {
   CreatePostMediaInput,
@@ -31,14 +33,36 @@ interface CreatePostModalProps {
   onCreated: (post: Post) => void;
 }
 
+type CropStatus = 'pending' | 'complete' | 'not_required';
+
+interface MediaCropState {
+  x: number;
+  y: number;
+  zoom: number;
+  croppedAreaPixels: Area | null;
+}
+
 interface SelectedPostMedia extends CreatePostMediaInput {
   id: string;
+  originalFile: File;
+  originalPreviewUrl: string;
   previewUrl: string;
+  originalWidth: number | null;
+  originalHeight: number | null;
+  cropStatus: CropStatus;
+  crop?: MediaCropState;
 }
 
 const IMAGE_MAX_BYTES = 10 * 1024 * 1024;
 const VIDEO_MAX_BYTES = 50 * 1024 * 1024;
 const MAX_MEDIA_ITEMS = 10;
+const CROPPED_IMAGE_QUALITY = 0.9;
+
+const ASPECT_RATIO_VALUES: Record<PostAspectRatio, number> = {
+  portrait: 4 / 5,
+  square: 1,
+  landscape: 1.91,
+};
 
 function getMediaType(file: File): PostMediaType | null {
   if (file.type.startsWith('image/')) return 'image';
@@ -65,6 +89,73 @@ function getVideoDimensions(url: string): Promise<{ width: number | null; height
   });
 }
 
+function loadImage(url: string): Promise<HTMLImageElement> {
+  return new Promise((resolve, reject) => {
+    const image = new Image();
+    image.onload = () => resolve(image);
+    image.onerror = () => reject(new Error('Unable to load image for cropping.'));
+    image.src = url;
+  });
+}
+
+function createCroppedFileName(fileName: string): string {
+  const dotIndex = fileName.lastIndexOf('.');
+  const baseName = dotIndex > 0 ? fileName.slice(0, dotIndex) : fileName;
+  return `${baseName}-cropped.jpg`;
+}
+
+async function createCroppedImageFile(
+  imageUrl: string,
+  cropPixels: Area,
+  fileName: string
+): Promise<File> {
+  const image = await loadImage(imageUrl);
+  const canvas = document.createElement('canvas');
+  canvas.width = Math.max(1, Math.round(cropPixels.width));
+  canvas.height = Math.max(1, Math.round(cropPixels.height));
+
+  const context = canvas.getContext('2d');
+  if (!context) {
+    throw new Error('Image crop is not supported on this device.');
+  }
+
+  context.drawImage(
+    image,
+    cropPixels.x,
+    cropPixels.y,
+    cropPixels.width,
+    cropPixels.height,
+    0,
+    0,
+    canvas.width,
+    canvas.height
+  );
+
+  const blob = await new Promise<Blob>((resolve, reject) => {
+    canvas.toBlob((result) => {
+      if (result) {
+        resolve(result);
+      } else {
+        reject(new Error('Unable to create cropped image.'));
+      }
+    }, 'image/jpeg', CROPPED_IMAGE_QUALITY);
+  });
+
+  return new File([blob], createCroppedFileName(fileName), {
+    type: 'image/jpeg',
+    lastModified: Date.now(),
+  });
+}
+
+function revokeSelectedMediaUrls(mediaItems: SelectedPostMedia[]): void {
+  mediaItems.forEach((media) => {
+    URL.revokeObjectURL(media.originalPreviewUrl);
+    if (media.previewUrl !== media.originalPreviewUrl) {
+      URL.revokeObjectURL(media.previewUrl);
+    }
+  });
+}
+
 async function createSelectedMedia(file: File): Promise<SelectedPostMedia | null> {
   const mediaType = getMediaType(file);
   if (!mediaType) return null;
@@ -76,12 +167,27 @@ async function createSelectedMedia(file: File): Promise<SelectedPostMedia | null
 
   return {
     id: `${file.name}-${file.lastModified}-${crypto.randomUUID()}`,
+    originalFile: file,
     file,
     mediaType,
+    originalPreviewUrl: previewUrl,
     previewUrl,
+    originalWidth: dimensions.width,
+    originalHeight: dimensions.height,
     width: dimensions.width,
     height: dimensions.height,
+    cropStatus: mediaType === 'image' ? 'pending' : 'not_required',
+    crop: mediaType === 'image'
+      ? { x: 0, y: 0, zoom: 1, croppedAreaPixels: null }
+      : undefined,
   };
+}
+
+function findNextPendingImage(items: SelectedPostMedia[], afterId?: string): string | null {
+  if (items.length === 0) return null;
+  const startIndex = afterId ? Math.max(0, items.findIndex((item) => item.id === afterId) + 1) : 0;
+  const orderedItems = [...items.slice(startIndex), ...items.slice(0, startIndex)];
+  return orderedItems.find((item) => item.mediaType === 'image' && item.cropStatus === 'pending')?.id ?? null;
 }
 
 export default function CreatePostModal({
@@ -93,12 +199,17 @@ export default function CreatePostModal({
   const [caption, setCaption] = useState('');
   const [selectedMedia, setSelectedMedia] = useState<SelectedPostMedia[]>([]);
   const [aspectRatio, setAspectRatio] = useState<PostAspectRatio>('square');
+  const [activeCropId, setActiveCropId] = useState<string | null>(null);
+  const [cropping, setCropping] = useState(false);
   const [posting, setPosting] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const selectedMediaRef = useRef<SelectedPostMedia[]>([]);
   const [presentToast] = useIonToast();
 
-  const canPost = selectedMedia.length > 0 && !posting;
+  const pendingImageCount = selectedMedia.filter((media) => media.mediaType === 'image' && media.cropStatus === 'pending').length;
+  const activeCropMedia = selectedMedia.find((media) => media.id === activeCropId) ?? null;
+  const allImagesCropped = pendingImageCount === 0;
+  const canPost = selectedMedia.length > 0 && allImagesCropped && !posting && !cropping;
 
   useEffect(() => {
     selectedMediaRef.current = selectedMedia;
@@ -106,15 +217,17 @@ export default function CreatePostModal({
 
   useEffect(() => {
     return () => {
-      selectedMediaRef.current.forEach((media) => URL.revokeObjectURL(media.previewUrl));
+      revokeSelectedMediaUrls(selectedMediaRef.current);
     };
   }, []);
 
   const reset = () => {
-    selectedMedia.forEach((media) => URL.revokeObjectURL(media.previewUrl));
+    revokeSelectedMediaUrls(selectedMedia);
     setSelectedMedia([]);
     setCaption('');
     setAspectRatio('square');
+    setActiveCropId(null);
+    setCropping(false);
     setPosting(false);
   };
 
@@ -169,7 +282,11 @@ export default function CreatePostModal({
     }
 
     if (nextMedia.length > 0) {
-      setSelectedMedia((current) => [...current, ...nextMedia]);
+      setSelectedMedia((current) => {
+        const updated = [...current, ...nextMedia];
+        setActiveCropId(findNextPendingImage(updated) ?? null);
+        return updated;
+      });
     }
   };
 
@@ -177,10 +294,103 @@ export default function CreatePostModal({
     setSelectedMedia((current) => {
       const item = current.find((media) => media.id === id);
       if (item) {
-        URL.revokeObjectURL(item.previewUrl);
+        revokeSelectedMediaUrls([item]);
       }
-      return current.filter((media) => media.id !== id);
+      const updated = current.filter((media) => media.id !== id);
+      if (activeCropId === id) {
+        setActiveCropId(findNextPendingImage(updated) ?? null);
+      }
+      return updated;
     });
+  };
+
+  const handleAspectRatioChange = (nextAspectRatio: PostAspectRatio) => {
+    setAspectRatio(nextAspectRatio);
+    setSelectedMedia((current) => {
+      const updated = current.map((media) => {
+        if (media.mediaType !== 'image') return media;
+
+        if (media.previewUrl !== media.originalPreviewUrl) {
+          URL.revokeObjectURL(media.previewUrl);
+        }
+
+        return {
+          ...media,
+          file: media.originalFile,
+          previewUrl: media.originalPreviewUrl,
+          width: media.originalWidth,
+          height: media.originalHeight,
+          cropStatus: 'pending' as CropStatus,
+          crop: { x: 0, y: 0, zoom: 1, croppedAreaPixels: null },
+        };
+      });
+      setActiveCropId(findNextPendingImage(updated) ?? null);
+      return updated;
+    });
+  };
+
+  const updateActiveCrop = (patch: Partial<MediaCropState>) => {
+    if (!activeCropId) return;
+    setSelectedMedia((current) => current.map((media) => {
+      if (media.id !== activeCropId || media.mediaType !== 'image') return media;
+      return {
+        ...media,
+        crop: {
+          x: media.crop?.x ?? 0,
+          y: media.crop?.y ?? 0,
+          zoom: media.crop?.zoom ?? 1,
+          croppedAreaPixels: media.crop?.croppedAreaPixels ?? null,
+          ...patch,
+        },
+      };
+    }));
+  };
+
+  const confirmCrop = async () => {
+    if (!activeCropMedia || activeCropMedia.mediaType !== 'image' || !activeCropMedia.crop?.croppedAreaPixels) {
+      return;
+    }
+
+    setCropping(true);
+    try {
+      const croppedFile = await createCroppedImageFile(
+        activeCropMedia.originalPreviewUrl,
+        activeCropMedia.crop.croppedAreaPixels,
+        activeCropMedia.originalFile.name
+      );
+      const croppedPreviewUrl = URL.createObjectURL(croppedFile);
+
+      let updatedItems: SelectedPostMedia[] = [];
+      setSelectedMedia((current) => {
+        updatedItems = current.map((media) => {
+          if (media.id !== activeCropMedia.id) return media;
+          if (media.previewUrl !== media.originalPreviewUrl) {
+            URL.revokeObjectURL(media.previewUrl);
+          }
+
+          return {
+            ...media,
+            file: croppedFile,
+            previewUrl: croppedPreviewUrl,
+            width: activeCropMedia.crop?.croppedAreaPixels?.width ?? media.width,
+            height: activeCropMedia.crop?.croppedAreaPixels?.height ?? media.height,
+            cropStatus: 'complete',
+          };
+        });
+        return updatedItems;
+      });
+
+      setActiveCropId(findNextPendingImage(updatedItems, activeCropMedia.id));
+    } catch (error) {
+      await presentToast({
+        message: error instanceof Error ? error.message : 'Unable to crop image.',
+        duration: 2200,
+        color: 'danger',
+        position: 'top',
+      });
+    } finally {
+      setCropping(false);
+    }
   };
 
   const handlePost = async () => {
@@ -220,12 +430,55 @@ export default function CreatePostModal({
     }
   };
 
+  const activeCrop = activeCropMedia?.crop ?? { x: 0, y: 0, zoom: 1, croppedAreaPixels: null };
+  const cropEditor = activeCropMedia?.mediaType === 'image' ? (
+    <section className="create-post-crop-editor" aria-label="Adjust image crop">
+      <div className={`create-post-crop-stage create-post-crop-stage-${aspectRatio}`}>
+        <Cropper
+          image={activeCropMedia.originalPreviewUrl}
+          crop={{ x: activeCrop.x, y: activeCrop.y }}
+          zoom={activeCrop.zoom}
+          aspect={ASPECT_RATIO_VALUES[aspectRatio]}
+          minZoom={1}
+          maxZoom={4}
+          cropShape="rect"
+          showGrid={false}
+          onCropChange={(nextCrop: Point) => updateActiveCrop({ x: nextCrop.x, y: nextCrop.y })}
+          onZoomChange={(nextZoom: number) => updateActiveCrop({ zoom: nextZoom })}
+          onCropComplete={(_, croppedAreaPixels) => updateActiveCrop({ croppedAreaPixels })}
+        />
+      </div>
+
+      <div className="create-post-crop-controls">
+        <div className="create-post-crop-copy">
+          <strong>Adjust crop</strong>
+          <span>{pendingImageCount} image{pendingImageCount === 1 ? '' : 's'} left</span>
+        </div>
+        <IonRange
+          min={1}
+          max={4}
+          step={0.05}
+          value={activeCrop.zoom}
+          onIonInput={(event) => updateActiveCrop({ zoom: Number(event.detail.value) })}
+          aria-label="Crop zoom"
+        />
+        <IonButton
+          expand="block"
+          onClick={() => void confirmCrop()}
+          disabled={cropping || !activeCrop.croppedAreaPixels}
+        >
+          {cropping ? <IonSpinner name="crescent" /> : 'Use Crop'}
+        </IonButton>
+      </div>
+    </section>
+  ) : null;
+
   return (
     <IonModal isOpen={isOpen} onDidDismiss={handleDismiss}>
       <IonHeader>
         <IonToolbar>
           <IonButtons slot="start">
-            <IonButton onClick={handleDismiss} disabled={posting}>Cancel</IonButton>
+            <IonButton onClick={handleDismiss} disabled={posting || cropping}>Cancel</IonButton>
           </IonButtons>
           <IonTitle>New Post</IonTitle>
           <IonButtons slot="end">
@@ -237,13 +490,15 @@ export default function CreatePostModal({
       </IonHeader>
 
       <IonContent className="create-post-modal">
-        <div className={`create-post-preview create-post-preview-${aspectRatio}`}>
+        {cropEditor}
+
+        <div className={`create-post-preview create-post-preview-${aspectRatio} ${cropEditor ? 'create-post-preview-disabled' : ''}`}>
           {selectedMedia.length === 0 ? (
             <button
               type="button"
               className="create-post-empty"
               onClick={() => fileInputRef.current?.click()}
-              disabled={posting}
+              disabled={posting || cropping}
             >
               <IonIcon icon={imagesOutline} />
               <strong>Choose photos or videos</strong>
@@ -269,11 +524,25 @@ export default function CreatePostModal({
                     />
                   )}
                   <span className="create-post-preview-count">{index + 1}/{selectedMedia.length}</span>
+                  {media.cropStatus === 'pending' && (
+                    <span className="create-post-crop-pending">Crop needed</span>
+                  )}
+                  {media.mediaType === 'image' && (
+                    <button
+                      type="button"
+                      className="create-post-adjust"
+                      onClick={() => setActiveCropId(media.id)}
+                      disabled={posting || cropping}
+                      aria-label="Adjust crop"
+                    >
+                      <IonIcon icon={cropOutline} />
+                    </button>
+                  )}
                   <button
                     type="button"
                     className="create-post-remove"
                     onClick={() => removeMedia(media.id)}
-                    disabled={posting}
+                    disabled={posting || cropping}
                     aria-label="Remove selected media"
                   >
                     <IonIcon icon={close} />
@@ -286,8 +555,9 @@ export default function CreatePostModal({
 
         <IonSegment
           value={aspectRatio}
-          onIonChange={(event) => setAspectRatio((event.detail.value as PostAspectRatio | undefined) ?? 'square')}
+          onIonChange={(event) => handleAspectRatioChange((event.detail.value as PostAspectRatio | undefined) ?? 'square')}
           className="create-post-ratio-segment"
+          disabled={posting || cropping}
         >
           <IonSegmentButton value="portrait">4:5</IonSegmentButton>
           <IonSegmentButton value="square">1:1</IonSegmentButton>
@@ -298,12 +568,12 @@ export default function CreatePostModal({
           <IonButton
             fill="outline"
             onClick={() => fileInputRef.current?.click()}
-            disabled={posting || selectedMedia.length >= MAX_MEDIA_ITEMS}
+            disabled={posting || cropping || selectedMedia.length >= MAX_MEDIA_ITEMS}
           >
             <IonIcon slot="start" icon={add} />
             Add Media
           </IonButton>
-          <span>{selectedMedia.length}/{MAX_MEDIA_ITEMS}</span>
+          <span>{pendingImageCount > 0 ? `${pendingImageCount} crop needed` : `${selectedMedia.length}/${MAX_MEDIA_ITEMS}`}</span>
         </div>
 
         <IonTextarea
@@ -315,6 +585,7 @@ export default function CreatePostModal({
           label="Caption"
           labelPlacement="floating"
           className="create-post-caption"
+          disabled={posting || cropping}
         />
 
         <input

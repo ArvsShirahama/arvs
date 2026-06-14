@@ -3,8 +3,11 @@ export interface Profile {
   username: string;
   display_name: string;
   avatar_url: string | null;
+  bio: string;
+  status_message: string;
   last_seen: string | null;
   created_at: string;
+  updated_at: string | null;
 }
 
 export interface Conversation {

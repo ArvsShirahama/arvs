@@ -183,16 +183,16 @@ export default function VideoCallModal({
             >
               <IonIcon icon={chevronDown} />
             </button>
-            {((typeof document !== 'undefined' && 'pictureInPictureEnabled' in document && document.pictureInPictureEnabled) || 
+            {((typeof document !== 'undefined' && 'pictureInPictureEnabled' in document && document.pictureInPictureEnabled) ||
               (Capacitor.isNativePlatform() && Capacitor.getPlatform() === 'android')) && onTriggerPiP && (
-              <button
-                className="video-call-minimize-btn video-call-pip-btn"
-                onClick={onTriggerPiP}
-                aria-label="Enter Picture-in-Picture"
-              >
-                <IonIcon icon={tvOutline} />
-              </button>
-            )}
+                <button
+                  className="video-call-minimize-btn video-call-pip-btn"
+                  onClick={onTriggerPiP}
+                  aria-label="Enter Picture-in-Picture"
+                >
+                  <IonIcon icon={tvOutline} />
+                </button>
+              )}
           </div>
         )}
 

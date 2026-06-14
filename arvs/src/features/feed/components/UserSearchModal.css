@@ -1,0 +1,74 @@
+.user-search-modal {
+  --background: var(--ion-background-color);
+}
+
+.user-search-input {
+  padding: 0.75rem 1rem 0.35rem;
+}
+
+.user-search-list {
+  padding: 0.25rem 0.75rem 1rem;
+  background: transparent;
+}
+
+.user-search-item {
+  --background: var(--app-surface);
+  --border-radius: 16px;
+  --inner-padding-end: 0.65rem;
+  --padding-start: 0.75rem;
+  margin-bottom: 0.55rem;
+  border-radius: 16px;
+}
+
+.user-search-label {
+  min-width: 0;
+  margin-left: 0.75rem;
+}
+
+.user-search-label h2,
+.user-search-label p {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.user-search-label h2 {
+  margin: 0;
+  color: var(--app-text);
+  font-size: 0.95rem;
+  font-weight: 750;
+}
+
+.user-search-label p {
+  margin: 0.14rem 0 0;
+  color: var(--app-text-muted);
+  font-size: 0.78rem;
+}
+
+.user-search-follow-btn {
+  --border-radius: 999px;
+  min-width: 86px;
+  min-height: 30px;
+  text-transform: none;
+  font-size: 0.75rem;
+  font-weight: 750;
+}
+
+.user-search-follow-btn ion-spinner {
+  width: 1rem;
+  height: 1rem;
+}
+
+.user-search-loading,
+.user-search-empty {
+  display: grid;
+  min-height: 28vh;
+  place-items: center;
+  padding: 1.5rem;
+  text-align: center;
+}
+
+.user-search-empty p {
+  margin: 0;
+  font-size: 0.9rem;
+}

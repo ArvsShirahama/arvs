@@ -1,0 +1,89 @@
+.social-profile-header {
+  padding: 1rem;
+  border-bottom: 1px solid var(--app-border);
+  background: var(--app-surface);
+}
+
+.social-profile-top {
+  display: grid;
+  grid-template-columns: auto 1fr;
+  gap: 1.15rem;
+  align-items: center;
+}
+
+.social-profile-stats {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 0.35rem;
+  text-align: center;
+}
+
+.social-profile-stats span,
+.social-profile-stats button {
+  display: grid;
+  gap: 0.12rem;
+  min-width: 0;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  color: var(--app-text-muted);
+  font: inherit;
+  font-size: 0.78rem;
+}
+
+.social-profile-stats strong {
+  color: var(--app-text);
+  font-size: 1rem;
+  font-weight: 850;
+}
+
+.social-profile-copy {
+  margin-top: 0.85rem;
+}
+
+.social-profile-copy h1 {
+  margin: 0;
+  color: var(--app-text);
+  font-size: 1rem;
+  font-weight: 850;
+}
+
+.social-profile-username,
+.social-profile-bio,
+.social-profile-status {
+  margin: 0.2rem 0 0;
+  line-height: 1.35;
+}
+
+.social-profile-username {
+  color: var(--app-text-muted);
+  font-size: 0.86rem;
+}
+
+.social-profile-bio {
+  color: var(--app-text);
+  font-size: 0.92rem;
+  white-space: pre-wrap;
+}
+
+.social-profile-status {
+  display: inline-flex;
+  max-width: 100%;
+  border-radius: 999px;
+  padding: 0.28rem 0.55rem;
+  background: var(--ion-color-step-50, rgba(127, 127, 127, 0.1));
+  color: var(--app-text-muted);
+  font-size: 0.8rem;
+  font-weight: 700;
+}
+
+.social-profile-actions {
+  margin-top: 0.85rem;
+}
+
+.social-profile-actions ion-button {
+  --border-radius: 12px;
+  min-height: 40px;
+  text-transform: none;
+  font-weight: 800;
+}
