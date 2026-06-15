@@ -152,7 +152,7 @@ export interface StoryReply {
 }
 
 export type PostMediaType = 'image' | 'video';
-export type PostAspectRatio = 'portrait' | 'square' | 'landscape';
+export type PostAspectRatio = 'portrait' | 'square' | 'landscape' | 'original';
 
 export interface Post {
   id: string;

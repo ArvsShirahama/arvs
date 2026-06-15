@@ -58,7 +58,7 @@ const VIDEO_MAX_BYTES = 50 * 1024 * 1024;
 const MAX_MEDIA_ITEMS = 10;
 const CROPPED_IMAGE_QUALITY = 0.9;
 
-const ASPECT_RATIO_VALUES: Record<PostAspectRatio, number> = {
+const ASPECT_RATIO_VALUES: Record<Exclude<PostAspectRatio, 'original'>, number> = {
   portrait: 4 / 5,
   square: 1,
   landscape: 1.91,
@@ -277,6 +277,9 @@ export default function CreatePostModal({
 
       const media = await createSelectedMedia(file);
       if (media) {
+        if (aspectRatio === 'original' && media.mediaType === 'image') {
+          media.cropStatus = 'not_required';
+        }
         nextMedia.push(media);
       }
     }
@@ -320,7 +323,7 @@ export default function CreatePostModal({
           previewUrl: media.originalPreviewUrl,
           width: media.originalWidth,
           height: media.originalHeight,
-          cropStatus: 'pending' as CropStatus,
+          cropStatus: nextAspectRatio === 'original' ? 'not_required' : ('pending' as CropStatus),
           crop: { x: 0, y: 0, zoom: 1, croppedAreaPixels: null },
         };
       });
@@ -433,12 +436,25 @@ export default function CreatePostModal({
   const activeCrop = activeCropMedia?.crop ?? { x: 0, y: 0, zoom: 1, croppedAreaPixels: null };
   const cropEditor = activeCropMedia?.mediaType === 'image' ? (
     <section className="create-post-crop-editor" aria-label="Adjust image crop">
-      <div className={`create-post-crop-stage create-post-crop-stage-${aspectRatio}`}>
+      <div
+        className={`create-post-crop-stage create-post-crop-stage-${aspectRatio}`}
+        style={
+          aspectRatio === 'original' && activeCropMedia.originalWidth && activeCropMedia.originalHeight
+            ? { aspectRatio: `${activeCropMedia.originalWidth} / ${activeCropMedia.originalHeight}` }
+            : undefined
+        }
+      >
         <Cropper
           image={activeCropMedia.originalPreviewUrl}
           crop={{ x: activeCrop.x, y: activeCrop.y }}
           zoom={activeCrop.zoom}
-          aspect={ASPECT_RATIO_VALUES[aspectRatio]}
+          aspect={
+            aspectRatio === 'original'
+              ? (activeCropMedia.originalWidth && activeCropMedia.originalHeight
+                  ? activeCropMedia.originalWidth / activeCropMedia.originalHeight
+                  : 1)
+              : ASPECT_RATIO_VALUES[aspectRatio as Exclude<PostAspectRatio, 'original'>]
+          }
           minZoom={1}
           maxZoom={4}
           cropShape="rect"
@@ -492,7 +508,14 @@ export default function CreatePostModal({
       <IonContent className="create-post-modal">
         {cropEditor}
 
-        <div className={`create-post-preview create-post-preview-${aspectRatio} ${cropEditor ? 'create-post-preview-disabled' : ''}`}>
+        <div
+          className={`create-post-preview create-post-preview-${aspectRatio} ${cropEditor ? 'create-post-preview-disabled' : ''}`}
+          style={
+            aspectRatio === 'original' && selectedMedia[0]?.width && selectedMedia[0]?.height
+              ? { aspectRatio: `${selectedMedia[0].width} / ${selectedMedia[0].height}` }
+              : undefined
+          }
+        >
           {selectedMedia.length === 0 ? (
             <button
               type="button"
@@ -562,6 +585,7 @@ export default function CreatePostModal({
           <IonSegmentButton value="portrait">4:5</IonSegmentButton>
           <IonSegmentButton value="square">1:1</IonSegmentButton>
           <IonSegmentButton value="landscape">1.91:1</IonSegmentButton>
+          <IonSegmentButton value="original">Original</IonSegmentButton>
         </IonSegment>
 
         <div className="create-post-picker-row">

@@ -49,8 +49,16 @@ export default function PostCarousel({
     return null;
   }
 
+  const firstMedia = media[0];
+  const dynamicStyle = aspectRatio === 'original' && firstMedia?.width && firstMedia?.height
+    ? { aspectRatio: `${firstMedia.width} / ${firstMedia.height}` }
+    : undefined;
+
   return (
-    <div className={`post-carousel post-carousel-${aspectRatio}`}>
+    <div
+      className={`post-carousel post-carousel-${aspectRatio}`}
+      style={dynamicStyle}
+    >
       <div
         ref={scrollRef}
         className="post-carousel-track"

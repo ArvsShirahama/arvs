@@ -16,7 +16,7 @@ BEGIN
   ) THEN
     ALTER TABLE posts
     ADD CONSTRAINT posts_aspect_ratio_check
-    CHECK (aspect_ratio IN ('portrait', 'square', 'landscape'));
+    CHECK (aspect_ratio IN ('portrait', 'square', 'landscape', 'original'));
   END IF;
 END;
 $$;

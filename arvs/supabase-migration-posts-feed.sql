@@ -9,7 +9,7 @@
     media_url TEXT NOT NULL,
     media_path TEXT NOT NULL,
     media_type TEXT NOT NULL CHECK (media_type IN ('image', 'video')),
-    aspect_ratio TEXT DEFAULT 'square' NOT NULL CHECK (aspect_ratio IN ('portrait', 'square', 'landscape')),
+    aspect_ratio TEXT DEFAULT 'square' NOT NULL CHECK (aspect_ratio IN ('portrait', 'square', 'landscape', 'original')),
     caption TEXT DEFAULT '' NOT NULL CHECK (char_length(caption) <= 2200),
     created_at TIMESTAMPTZ DEFAULT now() NOT NULL,
     updated_at TIMESTAMPTZ DEFAULT now() NOT NULL
