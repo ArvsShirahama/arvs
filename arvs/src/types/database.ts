@@ -210,3 +210,19 @@ export interface FeedPageCursor {
   beforeCreatedAt: string | null;
   limit: number;
 }
+
+export type NotificationType = 'like' | 'comment' | 'follow';
+
+export interface Notification {
+  id: string;
+  recipient_id: string;
+  actor_id: string;
+  type: NotificationType;
+  post_id: string | null;
+  is_read: boolean;
+  created_at: string;
+}
+
+export interface NotificationWithActor extends Notification {
+  actor: Profile;
+}

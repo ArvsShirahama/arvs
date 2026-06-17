@@ -6,7 +6,6 @@ import {
   IonHeader,
   IonInput,
   IonModal,
-  IonPage,
   IonSpinner,
   IonTextarea,
   IonTitle,
@@ -165,78 +164,76 @@ export default function EditProfileModal({
 
   return (
     <IonModal isOpen={isOpen} onDidDismiss={onDismiss}>
-      <IonPage>
-        <IonHeader>
-          <IonToolbar>
-            <IonButtons slot="start">
-              <IonButton onClick={onDismiss} disabled={saving}>Cancel</IonButton>
-            </IonButtons>
-            <IonTitle>Edit Profile</IonTitle>
-            <IonButtons slot="end">
-              <IonButton onClick={() => void handleSave()} disabled={saving}>
-                {saving ? <IonSpinner name="crescent" /> : 'Save'}
-              </IonButton>
-            </IonButtons>
-          </IonToolbar>
-        </IonHeader>
-
-        <IonContent className="edit-profile-modal">
-          <div className="edit-profile-avatar">
-            <Avatar
-              src={avatarPreviewUrl ?? profile?.avatar_url}
-              name={avatarName}
-              size="large"
-              onClick={() => fileInputRef.current?.click()}
-            />
-            <IonButton fill="clear" onClick={() => fileInputRef.current?.click()} disabled={saving}>
-              Change Photo
+      <IonHeader>
+        <IonToolbar>
+          <IonButtons slot="start">
+            <IonButton onClick={onDismiss} disabled={saving}>Cancel</IonButton>
+          </IonButtons>
+          <IonTitle>Edit Profile</IonTitle>
+          <IonButtons slot="end">
+            <IonButton onClick={() => void handleSave()} disabled={saving}>
+              {saving ? <IonSpinner name="crescent" /> : 'Save'}
             </IonButton>
-            <input
-              ref={fileInputRef}
-              type="file"
-              accept="image/*"
-              hidden
-              onChange={(event) => void handleAvatarSelected(event)}
-            />
-          </div>
+          </IonButtons>
+        </IonToolbar>
+      </IonHeader>
 
-          <div className="edit-profile-form">
-            <IonInput
-              label="Display Name"
-              labelPlacement="floating"
-              fill="outline"
-              value={displayName}
-              onIonInput={(event) => setDisplayName(event.detail.value ?? '')}
-              maxlength={80}
-            />
-            <IonInput
-              label="Username"
-              labelPlacement="floating"
-              fill="outline"
-              value={username}
-              onIonInput={(event) => setUsername(event.detail.value ?? '')}
-              maxlength={40}
-            />
-            <IonTextarea
-              label="Bio"
-              labelPlacement="floating"
-              fill="outline"
-              value={bio}
-              onIonInput={(event) => setBio(event.detail.value ?? '')}
-              maxlength={160}
-              autoGrow
-            />
-            <IonInput
-              label="Status"
-              labelPlacement="floating"
-              fill="outline"
-              value={statusMessage}
-              onIonInput={(event) => setStatusMessage(event.detail.value ?? '')}
-              maxlength={80}
-            />
-          </div>
-        </IonContent>
-      </IonPage>
+      <IonContent className="edit-profile-modal">
+        <div className="edit-profile-avatar">
+          <Avatar
+            src={avatarPreviewUrl ?? profile?.avatar_url}
+            name={avatarName}
+            size="large"
+            onClick={() => fileInputRef.current?.click()}
+          />
+          <IonButton fill="clear" onClick={() => fileInputRef.current?.click()} disabled={saving}>
+            Change Photo
+          </IonButton>
+          <input
+            ref={fileInputRef}
+            type="file"
+            accept="image/*"
+            hidden
+            onChange={(event) => void handleAvatarSelected(event)}
+          />
+        </div>
+
+        <div className="edit-profile-form">
+          <IonInput
+            label="Display Name"
+            labelPlacement="floating"
+            fill="outline"
+            value={displayName}
+            onIonInput={(event) => setDisplayName(event.detail.value ?? '')}
+            maxlength={80}
+          />
+          <IonInput
+            label="Username"
+            labelPlacement="floating"
+            fill="outline"
+            value={username}
+            onIonInput={(event) => setUsername(event.detail.value ?? '')}
+            maxlength={40}
+          />
+          <IonTextarea
+            label="Bio"
+            labelPlacement="floating"
+            fill="outline"
+            value={bio}
+            onIonInput={(event) => setBio(event.detail.value ?? '')}
+            maxlength={160}
+            autoGrow
+          />
+          <IonInput
+            label="Status"
+            labelPlacement="floating"
+            fill="outline"
+            value={statusMessage}
+            onIonInput={(event) => setStatusMessage(event.detail.value ?? '')}
+            maxlength={80}
+          />
+        </div>
+      </IonContent>
     </IonModal>
   );
 }

@@ -8,7 +8,6 @@ import {
   IonLabel,
   IonList,
   IonModal,
-  IonPage,
   IonSearchbar,
   IonSpinner,
   IonText,
@@ -179,85 +178,83 @@ export default function UserSearchModal({
 
   return (
     <IonModal isOpen={isOpen} onDidDismiss={handleDidDismiss}>
-      <IonPage>
-        <IonHeader>
-          <IonToolbar>
-            <IonButtons slot="start">
-              <IonButton onClick={onDismiss}>Cancel</IonButton>
-            </IonButtons>
-            <IonTitle>Search Users</IonTitle>
-          </IonToolbar>
-        </IonHeader>
+      <IonHeader>
+        <IonToolbar>
+          <IonButtons slot="start">
+            <IonButton onClick={onDismiss}>Cancel</IonButton>
+          </IonButtons>
+          <IonTitle>Search Users</IonTitle>
+        </IonToolbar>
+      </IonHeader>
 
-        <IonContent className="user-search-modal">
-          <IonSearchbar
-            value={query}
-            onIonInput={(event) => setQuery(event.detail.value ?? '')}
-            placeholder="Search username or name"
-            className="user-search-input"
-            autoFocus
-          />
+      <IonContent className="user-search-modal">
+        <IonSearchbar
+          value={query}
+          onIonInput={(event) => setQuery(event.detail.value ?? '')}
+          placeholder="Search username or name"
+          className="user-search-input"
+          autoFocus
+        />
 
-          {query.trim().length < 2 && (
-            <div className="user-search-empty">
-              <IonText color="medium">
-                <p>Search people by username or name.</p>
-              </IonText>
-            </div>
-          )}
+        {query.trim().length < 2 && (
+          <div className="user-search-empty">
+            <IonText color="medium">
+              <p>Search people by username or name.</p>
+            </IonText>
+          </div>
+        )}
 
-          {searching && (
-            <div className="user-search-loading">
-              <IonSpinner name="crescent" />
-            </div>
-          )}
+        {searching && (
+          <div className="user-search-loading">
+            <IonSpinner name="crescent" />
+          </div>
+        )}
 
-          {showEmptyState && (
-            <div className="user-search-empty">
-              <IonText color="medium">
-                <p>No users found.</p>
-              </IonText>
-            </div>
-          )}
+        {showEmptyState && (
+          <div className="user-search-empty">
+            <IonText color="medium">
+              <p>No users found.</p>
+            </IonText>
+          </div>
+        )}
 
-          <IonList lines="none" className="user-search-list">
-            {results.map((profile) => {
-              const displayName = getDisplayName(profile);
-              const isFollowing = followingIds.has(profile.id);
-              const isBusy = busyUserId === profile.id;
+        <IonList lines="none" className="user-search-list">
+          {results.map((profile) => {
+            const displayName = getDisplayName(profile);
+            const isFollowing = followingIds.has(profile.id);
+            const isBusy = busyUserId === profile.id;
 
-              return (
-                <IonItem
-                  key={profile.id}
-                  button
-                  className="user-search-item"
-                  onClick={() => openProfile(profile.id)}
+            return (
+              <IonItem
+                key={profile.id}
+                button
+                className="user-search-item"
+                onClick={() => openProfile(profile.id)}
+              >
+                <Avatar
+                  src={profile.avatar_url}
+                  name={displayName}
+                  size="medium"
+                />
+                <IonLabel className="user-search-label">
+                  <h2>{displayName}</h2>
+                  <p>@{profile.username}</p>
+                </IonLabel>
+                <IonButton
+                  slot="end"
+                  size="small"
+                  fill={isFollowing ? 'outline' : 'solid'}
+                  className="user-search-follow-btn"
+                  disabled={isBusy}
+                  onClick={(event) => void toggleFollow(event, profile.id)}
                 >
-                  <Avatar
-                    src={profile.avatar_url}
-                    name={displayName}
-                    size="medium"
-                  />
-                  <IonLabel className="user-search-label">
-                    <h2>{displayName}</h2>
-                    <p>@{profile.username}</p>
-                  </IonLabel>
-                  <IonButton
-                    slot="end"
-                    size="small"
-                    fill={isFollowing ? 'outline' : 'solid'}
-                    className="user-search-follow-btn"
-                    disabled={isBusy}
-                    onClick={(event) => void toggleFollow(event, profile.id)}
-                  >
-                    {isBusy ? <IonSpinner name="crescent" /> : isFollowing ? 'Following' : 'Follow'}
-                  </IonButton>
-                </IonItem>
-              );
-            })}
-          </IonList>
-        </IonContent>
-      </IonPage>
+                  {isBusy ? <IonSpinner name="crescent" /> : isFollowing ? 'Following' : 'Follow'}
+                </IonButton>
+              </IonItem>
+            );
+          })}
+        </IonList>
+      </IonContent>
     </IonModal>
   );
 }

@@ -19,16 +19,17 @@ import {
   type RefresherCustomEvent,
   useIonToast,
 } from '@ionic/react';
-import { add, imagesOutline, searchOutline } from 'ionicons/icons';
+import { add, imagesOutline, notificationsOutline, searchOutline } from 'ionicons/icons';
 import { useAuth } from '../../auth/hooks';
 import { supabase } from '../../../supabaseClient';
 import type { Post, PostWithAuthor } from '../../../types/database';
-import { CreatePostModal, PostCard, UserSearchModal } from '../components';
+import { CreatePostModal, NotificationPanel, PostCard, UserSearchModal } from '../components';
 import {
   deletePost,
   followUser,
   getFeedPage,
   getPostById,
+  getUnreadCount,
   togglePostLike,
   unfollowUser,
 } from '../services';
@@ -45,6 +46,8 @@ export default function Feed() {
   const [cursor, setCursor] = useState<string | null>(null);
   const [showCreatePost, setShowCreatePost] = useState(false);
   const [showUserSearch, setShowUserSearch] = useState(false);
+  const [showNotifications, setShowNotifications] = useState(false);
+  const [unreadCount, setUnreadCount] = useState(0);
   const [busyPostId, setBusyPostId] = useState<string | null>(null);
   const [deleteTarget, setDeleteTarget] = useState<PostWithAuthor | null>(null);
   const refreshTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -74,6 +77,12 @@ export default function Feed() {
     void loadFirstPage(true);
   }, [loadFirstPage]);
 
+  // Load initial unread count
+  useEffect(() => {
+    if (!user) return;
+    void getUnreadCount(user.id).then(setUnreadCount).catch(() => {});
+  }, [user]);
+
   useEffect(() => {
     if (!user) return;
 
@@ -86,11 +95,16 @@ export default function Feed() {
       }, 500);
     };
 
+    const refreshUnread = () => {
+      void getUnreadCount(user.id).then(setUnreadCount).catch(() => {});
+    };
+
     const channel = supabase
       .channel('public-feed-updates')
       .on('postgres_changes', { event: '*', schema: 'public', table: 'posts' }, scheduleRefresh)
       .on('postgres_changes', { event: '*', schema: 'public', table: 'post_likes' }, scheduleRefresh)
       .on('postgres_changes', { event: '*', schema: 'public', table: 'follows' }, scheduleRefresh)
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'notifications', filter: `recipient_id=eq.${user.id}` }, refreshUnread)
       .subscribe();
 
     return () => {
@@ -218,6 +232,19 @@ export default function Feed() {
           <IonButtons slot="end">
             <IonButton
               fill="clear"
+              className="feed-notification-btn"
+              onClick={() => setShowNotifications((prev) => !prev)}
+              aria-label="Notifications"
+            >
+              <IonIcon icon={notificationsOutline} />
+              {unreadCount > 0 && (
+                <span className="feed-notification-badge">
+                  {unreadCount > 99 ? '99+' : unreadCount}
+                </span>
+              )}
+            </IonButton>
+            <IonButton
+              fill="clear"
               onClick={() => setShowUserSearch(true)}
               aria-label="Search users"
             >
@@ -290,7 +317,6 @@ export default function Feed() {
             onDismiss={() => setShowUserSearch(false)}
           />
         )}
-
         <IonAlert
           isOpen={Boolean(deleteTarget)}
           header="Delete post?"
@@ -302,6 +328,15 @@ export default function Feed() {
           onDidDismiss={() => setDeleteTarget(null)}
         />
       </IonContent>
+
+      {user && (
+        <NotificationPanel
+          isOpen={showNotifications}
+          userId={user.id}
+          onDismiss={() => setShowNotifications(false)}
+          onUnreadCountChange={setUnreadCount}
+        />
+      )}
     </IonPage>
   );
 }

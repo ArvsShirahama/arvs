@@ -37,6 +37,12 @@
  *    - Allows users to leave conversations
  *    - Allows users to delete their own profile
  * 
+ * 6. supabase-migration-notifications.sql
+ *    - Creates notifications table for likes, comments, and follows
+ *    - Sets up RLS policies for notification access
+ *    - Creates trigger functions that auto-generate notifications
+ *    - Enables realtime on notifications table
+ *
  * ⚠️ DO NOT RUN: supabase-migration-conversation-summaries-rpc.sql
  *    - This file is DEPRECATED and will break the app
  *    - The correct version is in file #4 above

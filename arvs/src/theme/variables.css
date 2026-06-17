@@ -29,6 +29,7 @@ http://ionicframework.com/docs/theming/ */
   --app-surface-strong: #ffffff;
   --app-border-color: rgba(15, 23, 42, 0.08);
   --app-border-strong: rgba(15, 23, 42, 0.12);
+  --app-text: var(--ion-text-color);
   --app-text-muted: #6b7280;
   --app-shadow-soft: 0 12px 28px rgba(15, 23, 42, 0.06);
   --app-shadow-strong: 0 18px 40px rgba(15, 23, 42, 0.12);
@@ -68,6 +69,7 @@ http://ionicframework.com/docs/theming/ */
     --app-surface-strong: #16162a;
     --app-border-color: rgba(228, 228, 231, 0.08);
     --app-border-strong: rgba(228, 228, 231, 0.14);
+    --app-text: var(--ion-text-color);
     --app-text-muted: #a1a1aa;
     --app-shadow-soft: 0 12px 30px rgba(0, 0, 0, 0.28);
     --app-shadow-strong: 0 18px 40px rgba(0, 0, 0, 0.42);
